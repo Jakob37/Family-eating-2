@@ -1,6 +1,6 @@
 {
-    "name": "family_food",
-    "short_name": "family_food",
+    "name": "Family eating",
+    "short_name": "Family eating",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
