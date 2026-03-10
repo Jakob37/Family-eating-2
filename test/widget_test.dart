@@ -39,6 +39,7 @@ void main() {
     expect(find.text('Cooked 0 times'), findsOneWidget);
     expect(find.text('No ratings yet'), findsOneWidget);
     expect(find.text('No cooking time logged'), findsOneWidget);
+    expect(find.text('Recipe portions: 4'), findsOneWidget);
     expect(find.text('Ingredients: Apple, Cinnamon'), findsOneWidget);
   });
 
@@ -211,11 +212,16 @@ void main() {
       find.byKey(const ValueKey<String>('ingredients_field')),
       'Tomato\nOnion\nGarlic',
     );
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('default_portions_field')),
+      '6',
+    );
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
     expect(find.text('Tomato Soup'), findsOneWidget);
     expect(find.text('Soup'), findsNothing);
+    expect(find.text('Recipe portions: 6'), findsOneWidget);
     expect(find.text('Ingredients: Tomato, Onion, Garlic'), findsOneWidget);
 
     final SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -229,8 +235,157 @@ void main() {
       items.first as Map,
     );
     expect(firstItem['name'], 'Tomato Soup');
+    expect(firstItem['defaultPortions'], 6);
     expect(firstItem['ingredients'], <String>['Tomato', 'Onion', 'Garlic']);
   });
+
+  testWidgets('Grocery trip builds copyable ingredient list from selections', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'family_eating.food_data': jsonEncode(<String, dynamic>{
+        'schemaVersion': 6,
+        'foodItems': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'name': 'Bolognese',
+            'proteins': <String>['meat'],
+            'defaultPortions': 4,
+            'ingredients': <String>['500g minced meat', '1 onion', 'Salt'],
+            'cookingLogs': <Map<String, dynamic>>[],
+          },
+          <String, dynamic>{
+            'name': 'Meatballs',
+            'proteins': <String>['meat'],
+            'defaultPortions': 2,
+            'ingredients': <String>['250g minced meat', '2 onion', 'Pepper'],
+            'cookingLogs': <Map<String, dynamic>>[],
+          },
+        ],
+      }),
+    });
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('open_grocery_trip_button')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Grocery trip'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('grocery_toggle_Bolognese')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey<String>('grocery_toggle_Meatballs')),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('grocery_portions_Bolognese')),
+      '8',
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('get_ingredients_list_button')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('1.25kg minced meat'), findsOneWidget);
+    expect(find.text('4 onions'), findsOneWidget);
+    expect(find.text('Salt'), findsOneWidget);
+    expect(find.text('Pepper'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey<String>('grocery_item_Pepper')));
+    await tester.pumpAndSettle();
+
+    final SelectableText output = tester.widget<SelectableText>(
+      find.byKey(const ValueKey<String>('selected_ingredients_text')),
+    );
+    expect(output.data, contains('1.25kg minced meat'));
+    expect(output.data, contains('4 onions'));
+    expect(output.data, contains('Salt'));
+    expect(output.data, isNot(contains('Pepper')));
+  });
+
+  testWidgets(
+    'Grocery trip normalizes fractions, packages, volumes, and spoon units',
+    (WidgetTester tester) async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'family_eating.food_data': jsonEncode(<String, dynamic>{
+          'schemaVersion': 6,
+          'foodItems': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'name': 'Tray Bake',
+              'proteins': <String>['cheese'],
+              'defaultPortions': 2,
+              'ingredients': <String>[
+                '1/2 kg potatoes',
+                '2 packages tortillas',
+                '1 tbsp oil',
+                '1 onion',
+                '1 1/2 dl cream',
+              ],
+              'cookingLogs': <Map<String, dynamic>>[],
+            },
+            <String, dynamic>{
+              'name': 'Soup',
+              'proteins': <String>['beans'],
+              'defaultPortions': 4,
+              'ingredients': <String>[
+                '500g potatoes',
+                '1 pkg tortilla',
+                '3 tsp oil',
+                '2 onions',
+                '250 ml cream',
+              ],
+              'cookingLogs': <Map<String, dynamic>>[],
+            },
+          ],
+        }),
+      });
+
+      await tester.pumpWidget(const MyApp());
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey<String>('open_grocery_trip_button')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey<String>('grocery_toggle_Tray Bake')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey<String>('grocery_toggle_Soup')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('grocery_portions_Tray Bake')),
+        '4',
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey<String>('get_ingredients_list_button')),
+      );
+      await tester.pumpAndSettle();
+
+      final SelectableText output = tester.widget<SelectableText>(
+        find.byKey(const ValueKey<String>('selected_ingredients_text')),
+      );
+      expect(output.data, contains('1.5kg potatoes'));
+      expect(output.data, contains('5 packages tortillas'));
+      expect(output.data, contains('3 tbsp oil'));
+      expect(output.data, contains('4 onions'));
+      expect(output.data, contains('5.5dl cream'));
+    },
+  );
 
   testWidgets('Migrates legacy food names automatically', (
     WidgetTester tester,

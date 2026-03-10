@@ -1,8 +1,11 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'browser_window.dart';
 
 void main() {
   runApp(const MyApp());
@@ -18,7 +21,23 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: const MyHomePage(title: 'Family eating'),
+      initialRoute: WidgetsBinding.instance.platformDispatcher.defaultRouteName,
+      onGenerateRoute: (RouteSettings settings) {
+        switch (settings.name) {
+          case GroceryTripPage.routeName:
+            return MaterialPageRoute<void>(
+              builder: (BuildContext context) => const GroceryTripPage(),
+              settings: settings,
+            );
+          case '/':
+          default:
+            return MaterialPageRoute<void>(
+              builder: (BuildContext context) =>
+                  const MyHomePage(title: 'Family eating'),
+              settings: settings,
+            );
+        }
+      },
     );
   }
 }
@@ -29,12 +48,14 @@ class FoodItem {
     required this.proteins,
     this.ingredients = const <String>[],
     this.cookingLogs = const <CookingLog>[],
+    this.defaultPortions = 4,
   });
 
   final String name;
   final List<ProteinType> proteins;
   final List<String> ingredients;
   final List<CookingLog> cookingLogs;
+  final int defaultPortions;
 
   factory FoodItem.fromJson(Map<String, dynamic> json) {
     final String name = (json['name'] ?? '').toString().trim();
@@ -71,6 +92,7 @@ class FoodItem {
       proteins: proteins,
       ingredients: ingredients,
       cookingLogs: cookingLogs,
+      defaultPortions: _parseDefaultPortions(json['defaultPortions']),
     );
   }
 
@@ -84,6 +106,7 @@ class FoodItem {
       'cookingLogs': cookingLogs
           .map((CookingLog log) => log.toJson())
           .toList(growable: false),
+      'defaultPortions': defaultPortions,
     };
   }
 
@@ -122,12 +145,14 @@ class FoodItem {
     List<ProteinType>? proteins,
     List<String>? ingredients,
     List<CookingLog>? cookingLogs,
+    int? defaultPortions,
   }) {
     return FoodItem(
       name: name ?? this.name,
       proteins: proteins ?? this.proteins,
       ingredients: ingredients ?? this.ingredients,
       cookingLogs: cookingLogs ?? this.cookingLogs,
+      defaultPortions: defaultPortions ?? this.defaultPortions,
     );
   }
 
@@ -145,6 +170,13 @@ class FoodItem {
       ),
       growable: false,
     );
+  }
+
+  static int _parseDefaultPortions(dynamic rawValue) {
+    final int parsed = rawValue is num
+        ? rawValue.toInt()
+        : int.tryParse('$rawValue') ?? 4;
+    return parsed > 0 ? parsed : 4;
   }
 }
 
@@ -217,11 +249,442 @@ class DishEditorResult {
     required this.name,
     required this.proteins,
     required this.ingredients,
+    required this.defaultPortions,
   });
 
   final String name;
   final List<ProteinType> proteins;
   final List<String> ingredients;
+  final int defaultPortions;
+}
+
+class GroceryTripDishSelection {
+  const GroceryTripDishSelection({required this.item, required this.portions});
+
+  final FoodItem item;
+  final int portions;
+
+  GroceryTripDishSelection copyWith({FoodItem? item, int? portions}) {
+    return GroceryTripDishSelection(
+      item: item ?? this.item,
+      portions: portions ?? this.portions,
+    );
+  }
+}
+
+class GroceryListItem {
+  const GroceryListItem({required this.label, this.normalizedKey});
+
+  final String label;
+  final String? normalizedKey;
+}
+
+enum _IngredientUnitGroup { weight, volume, spoon, countLike }
+
+class _IngredientUnit {
+  const _IngredientUnit({
+    required this.key,
+    required this.group,
+    required this.factorToBase,
+    required this.singularLabel,
+    required this.pluralLabel,
+    required this.aliases,
+    this.attachToAmount = false,
+  });
+
+  final String key;
+  final _IngredientUnitGroup group;
+  final double factorToBase;
+  final String singularLabel;
+  final String pluralLabel;
+  final List<String> aliases;
+  final bool attachToAmount;
+
+  static const List<_IngredientUnit> values = <_IngredientUnit>[
+    _IngredientUnit(
+      key: 'g',
+      group: _IngredientUnitGroup.weight,
+      factorToBase: 1,
+      singularLabel: 'g',
+      pluralLabel: 'g',
+      aliases: <String>['g', 'gram', 'grams'],
+      attachToAmount: true,
+    ),
+    _IngredientUnit(
+      key: 'kg',
+      group: _IngredientUnitGroup.weight,
+      factorToBase: 1000,
+      singularLabel: 'kg',
+      pluralLabel: 'kg',
+      aliases: <String>['kg', 'kgs', 'kilo', 'kilos', 'kilogram', 'kilograms'],
+      attachToAmount: true,
+    ),
+    _IngredientUnit(
+      key: 'ml',
+      group: _IngredientUnitGroup.volume,
+      factorToBase: 1,
+      singularLabel: 'ml',
+      pluralLabel: 'ml',
+      aliases: <String>[
+        'ml',
+        'milliliter',
+        'milliliters',
+        'millilitre',
+        'millilitres',
+      ],
+      attachToAmount: true,
+    ),
+    _IngredientUnit(
+      key: 'cl',
+      group: _IngredientUnitGroup.volume,
+      factorToBase: 10,
+      singularLabel: 'cl',
+      pluralLabel: 'cl',
+      aliases: <String>[
+        'cl',
+        'centiliter',
+        'centiliters',
+        'centilitre',
+        'centilitres',
+      ],
+      attachToAmount: true,
+    ),
+    _IngredientUnit(
+      key: 'dl',
+      group: _IngredientUnitGroup.volume,
+      factorToBase: 100,
+      singularLabel: 'dl',
+      pluralLabel: 'dl',
+      aliases: <String>[
+        'dl',
+        'deciliter',
+        'deciliters',
+        'decilitre',
+        'decilitres',
+      ],
+      attachToAmount: true,
+    ),
+    _IngredientUnit(
+      key: 'l',
+      group: _IngredientUnitGroup.volume,
+      factorToBase: 1000,
+      singularLabel: 'l',
+      pluralLabel: 'l',
+      aliases: <String>['l', 'liter', 'liters', 'litre', 'litres'],
+      attachToAmount: true,
+    ),
+    _IngredientUnit(
+      key: 'tsp',
+      group: _IngredientUnitGroup.spoon,
+      factorToBase: 1,
+      singularLabel: 'tsp',
+      pluralLabel: 'tsp',
+      aliases: <String>['tsp', 'tsp.', 'teaspoon', 'teaspoons'],
+    ),
+    _IngredientUnit(
+      key: 'tbsp',
+      group: _IngredientUnitGroup.spoon,
+      factorToBase: 3,
+      singularLabel: 'tbsp',
+      pluralLabel: 'tbsp',
+      aliases: <String>['tbsp', 'tbsp.', 'tablespoon', 'tablespoons'],
+    ),
+    _IngredientUnit(
+      key: 'package',
+      group: _IngredientUnitGroup.countLike,
+      factorToBase: 1,
+      singularLabel: 'package',
+      pluralLabel: 'packages',
+      aliases: <String>[
+        'package',
+        'packages',
+        'pack',
+        'packs',
+        'pkg',
+        'pkgs',
+        'packet',
+        'packets',
+      ],
+    ),
+    _IngredientUnit(
+      key: 'bag',
+      group: _IngredientUnitGroup.countLike,
+      factorToBase: 1,
+      singularLabel: 'bag',
+      pluralLabel: 'bags',
+      aliases: <String>['bag', 'bags'],
+    ),
+    _IngredientUnit(
+      key: 'bottle',
+      group: _IngredientUnitGroup.countLike,
+      factorToBase: 1,
+      singularLabel: 'bottle',
+      pluralLabel: 'bottles',
+      aliases: <String>['bottle', 'bottles'],
+    ),
+    _IngredientUnit(
+      key: 'can',
+      group: _IngredientUnitGroup.countLike,
+      factorToBase: 1,
+      singularLabel: 'can',
+      pluralLabel: 'cans',
+      aliases: <String>['can', 'cans', 'tin', 'tins'],
+    ),
+    _IngredientUnit(
+      key: 'jar',
+      group: _IngredientUnitGroup.countLike,
+      factorToBase: 1,
+      singularLabel: 'jar',
+      pluralLabel: 'jars',
+      aliases: <String>['jar', 'jars'],
+    ),
+    _IngredientUnit(
+      key: 'piece',
+      group: _IngredientUnitGroup.countLike,
+      factorToBase: 1,
+      singularLabel: 'pc',
+      pluralLabel: 'pcs',
+      aliases: <String>['pc', 'pcs', 'piece', 'pieces'],
+    ),
+    _IngredientUnit(
+      key: 'clove',
+      group: _IngredientUnitGroup.countLike,
+      factorToBase: 1,
+      singularLabel: 'clove',
+      pluralLabel: 'cloves',
+      aliases: <String>['clove', 'cloves'],
+    ),
+    _IngredientUnit(
+      key: 'slice',
+      group: _IngredientUnitGroup.countLike,
+      factorToBase: 1,
+      singularLabel: 'slice',
+      pluralLabel: 'slices',
+      aliases: <String>['slice', 'slices'],
+    ),
+  ];
+
+  static final Map<String, _IngredientUnit> _byAlias =
+      <String, _IngredientUnit>{
+        for (final _IngredientUnit unit in values)
+          for (final String alias in unit.aliases) _normalizeToken(alias): unit,
+      };
+
+  static _IngredientUnit? fromToken(String token) {
+    return _byAlias[_normalizeToken(token)];
+  }
+
+  static String _normalizeToken(String token) {
+    return token.trim().toLowerCase().replaceAll(RegExp(r'[.,]$'), '');
+  }
+}
+
+class _ParsedIngredient {
+  const _ParsedIngredient({
+    required this.baseAmount,
+    required this.displayName,
+    required this.normalizedName,
+    this.unit,
+  });
+
+  final double baseAmount;
+  final String displayName;
+  final String normalizedName;
+  final _IngredientUnit? unit;
+
+  String get normalizedKey {
+    final String prefix = switch (unit?.group) {
+      _IngredientUnitGroup.weight => 'weight',
+      _IngredientUnitGroup.volume => 'volume',
+      _IngredientUnitGroup.spoon => 'spoon',
+      _IngredientUnitGroup.countLike => unit!.key,
+      null => 'count',
+    };
+    return '$prefix|$normalizedName';
+  }
+
+  String formatWithAmount(double totalBaseAmount) {
+    if (unit == null) {
+      final String noun = _isSingular(totalBaseAmount)
+          ? normalizedName
+          : _pluralizePhrase(normalizedName);
+      return '${_formatScaledAmount(totalBaseAmount)} $noun';
+    }
+
+    switch (unit!.group) {
+      case _IngredientUnitGroup.weight:
+        return _formatWithUnit(
+          displayUnit: totalBaseAmount >= 1000
+              ? _IngredientUnit.values.firstWhere(
+                  (_IngredientUnit candidate) => candidate.key == 'kg',
+                )
+              : _IngredientUnit.values.firstWhere(
+                  (_IngredientUnit candidate) => candidate.key == 'g',
+                ),
+          amount: totalBaseAmount >= 1000
+              ? totalBaseAmount / 1000
+              : totalBaseAmount,
+          name: displayName,
+        );
+      case _IngredientUnitGroup.volume:
+        if (totalBaseAmount >= 1000) {
+          return _formatWithUnit(
+            displayUnit: _IngredientUnit.values.firstWhere(
+              (_IngredientUnit candidate) => candidate.key == 'l',
+            ),
+            amount: totalBaseAmount / 1000,
+            name: displayName,
+          );
+        }
+        if (totalBaseAmount >= 100 && _isNearHalf(totalBaseAmount / 100)) {
+          return _formatWithUnit(
+            displayUnit: _IngredientUnit.values.firstWhere(
+              (_IngredientUnit candidate) => candidate.key == 'dl',
+            ),
+            amount: totalBaseAmount / 100,
+            name: displayName,
+          );
+        }
+        return _formatWithUnit(
+          displayUnit: _IngredientUnit.values.firstWhere(
+            (_IngredientUnit candidate) => candidate.key == 'ml',
+          ),
+          amount: totalBaseAmount,
+          name: displayName,
+        );
+      case _IngredientUnitGroup.spoon:
+        final double tablespoons = totalBaseAmount / 3;
+        if (totalBaseAmount >= 3 && _isNearHalf(tablespoons)) {
+          return _formatWithUnit(
+            displayUnit: _IngredientUnit.values.firstWhere(
+              (_IngredientUnit candidate) => candidate.key == 'tbsp',
+            ),
+            amount: tablespoons,
+            name: displayName,
+          );
+        }
+        return _formatWithUnit(
+          displayUnit: _IngredientUnit.values.firstWhere(
+            (_IngredientUnit candidate) => candidate.key == 'tsp',
+          ),
+          amount: totalBaseAmount,
+          name: displayName,
+        );
+      case _IngredientUnitGroup.countLike:
+        return _formatWithUnit(
+          displayUnit: unit!,
+          amount: totalBaseAmount,
+          name: displayName,
+        );
+    }
+  }
+
+  String _formatWithUnit({
+    required _IngredientUnit displayUnit,
+    required double amount,
+    required String name,
+  }) {
+    final String formattedAmount = _formatScaledAmount(amount);
+    final String unitLabel = _isSingular(amount)
+        ? displayUnit.singularLabel
+        : displayUnit.pluralLabel;
+    if (displayUnit.attachToAmount) {
+      return '$formattedAmount$unitLabel $name';
+    }
+    return '$formattedAmount $unitLabel $name';
+  }
+
+  static bool _isSingular(double value) => (value - 1).abs() < 0.0001;
+
+  static bool _isNearHalf(double value) {
+    final double rounded = (value * 2).roundToDouble() / 2;
+    return (value - rounded).abs() < 0.0001;
+  }
+
+  static String _formatScaledAmount(double value) {
+    final double rounded = value.roundToDouble();
+    if ((value - rounded).abs() < 0.0001) {
+      return rounded.toInt().toString();
+    }
+    String text = value.toStringAsFixed(2);
+    text = text.replaceFirst(RegExp(r'0+$'), '');
+    return text.replaceFirst(RegExp(r'\.$'), '');
+  }
+
+  static String _pluralizePhrase(String value) {
+    final List<String> words = value.split(' ');
+    if (words.isEmpty) {
+      return value;
+    }
+    final int lastWordIndex = words.lastIndexWhere((String word) {
+      return word.trim().isNotEmpty;
+    });
+    if (lastWordIndex == -1) {
+      return value;
+    }
+    words[lastWordIndex] = _pluralizeWord(words[lastWordIndex]);
+    return words.join(' ');
+  }
+
+  static String singularizePhrase(String value) {
+    final List<String> words = value.trim().split(RegExp(r'\s+'));
+    if (words.isEmpty || value.trim().isEmpty) {
+      return value.trim();
+    }
+    words[words.length - 1] = _singularizeWord(words.last);
+    return words.join(' ');
+  }
+
+  static String _pluralizeWord(String value) {
+    final String lower = value.toLowerCase();
+    if (lower.endsWith('y') && lower.length > 1) {
+      final String beforeY = lower[lower.length - 2];
+      if (!'aeiou'.contains(beforeY)) {
+        return '${lower.substring(0, lower.length - 1)}ies';
+      }
+    }
+    if (lower.endsWith('o') && lower.length > 1) {
+      final String beforeO = lower[lower.length - 2];
+      if (!'aeiou'.contains(beforeO)) {
+        return '${lower}es';
+      }
+    }
+    if (lower.endsWith('s') ||
+        lower.endsWith('x') ||
+        lower.endsWith('z') ||
+        lower.endsWith('ch') ||
+        lower.endsWith('sh')) {
+      return '${lower}es';
+    }
+    return '${lower}s';
+  }
+
+  static String _singularizeWord(String value) {
+    final String lower = value.toLowerCase();
+    if (lower.endsWith('ies') && lower.length > 3) {
+      return '${lower.substring(0, lower.length - 3)}y';
+    }
+    if ((lower.endsWith('ches') ||
+            lower.endsWith('shes') ||
+            lower.endsWith('xes') ||
+            lower.endsWith('zes') ||
+            lower.endsWith('ses') ||
+            lower.endsWith('oes')) &&
+        lower.length > 2) {
+      return lower.substring(0, lower.length - 2);
+    }
+    if (lower.endsWith('s') && !lower.endsWith('ss') && lower.length > 1) {
+      return lower.substring(0, lower.length - 1);
+    }
+    return lower;
+  }
+}
+
+class _IngredientAccumulator {
+  _IngredientAccumulator(this.template) : totalAmount = 0;
+
+  final _ParsedIngredient template;
+  double totalAmount;
 }
 
 class DishFilter {
@@ -292,7 +755,7 @@ enum ProteinType {
 }
 
 class FoodDataMigrator {
-  static const int currentVersion = 5;
+  static const int currentVersion = 6;
 
   Map<String, dynamic> migrate(Map<String, dynamic> source) {
     int version = _readVersion(source);
@@ -317,6 +780,9 @@ class FoodDataMigrator {
         case 4:
           working = _migrateV4ToV5(working);
           version = 5;
+        case 5:
+          working = _migrateV5ToV6(working);
+          version = 6;
         default:
           throw FormatException(
             'No migration registered from version $version.',
@@ -552,6 +1018,38 @@ class FoodDataMigrator {
         .toList(growable: false);
 
     return <String, dynamic>{'schemaVersion': 5, 'foodItems': migratedItems};
+  }
+
+  Map<String, dynamic> _migrateV5ToV6(Map<String, dynamic> source) {
+    final dynamic rawItems = source['foodItems'] ?? <dynamic>[];
+    final List<dynamic> list = rawItems is List ? rawItems : <dynamic>[];
+
+    final List<Map<String, dynamic>> migratedItems = list
+        .map<Map<String, dynamic>>((dynamic item) {
+          if (item is! Map) {
+            return <String, dynamic>{
+              'name': '$item',
+              'proteins': <String>[],
+              'ingredients': <String>[],
+              'cookingLogs': <Map<String, dynamic>>[],
+              'defaultPortions': 4,
+            };
+          }
+
+          final Map<String, dynamic> itemMap = Map<String, dynamic>.from(item);
+          return <String, dynamic>{
+            ...itemMap,
+            'defaultPortions': FoodItem._parseDefaultPortions(
+              itemMap['defaultPortions'],
+            ),
+          };
+        })
+        .where((Map<String, dynamic> item) {
+          return (item['name'] ?? '').toString().trim().isNotEmpty;
+        })
+        .toList(growable: false);
+
+    return <String, dynamic>{'schemaVersion': 6, 'foodItems': migratedItems};
   }
 
   int _parseCookedCount(dynamic rawValue) {
@@ -973,6 +1471,14 @@ class _MyHomePageState extends State<MyHomePage> {
     return parsed;
   }
 
+  int? _parsePositiveInt(String value) {
+    final int? parsed = int.tryParse(value.trim());
+    if (parsed == null || parsed <= 0) {
+      return null;
+    }
+    return parsed;
+  }
+
   List<String> _parseIngredients(String rawValue) {
     final Iterable<String> entries = rawValue
         .split(RegExp(r'[\n,]'))
@@ -1021,6 +1527,22 @@ class _MyHomePageState extends State<MyHomePage> {
       );
     }
     return chips;
+  }
+
+  Future<void> _openGroceryTrip() async {
+    if (_isLoading || _loadError != null) {
+      return;
+    }
+
+    if (openRouteInNewWindow(GroceryTripPage.routeName)) {
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    await Navigator.of(context).pushNamed(GroceryTripPage.routeName);
   }
 
   @override
@@ -1073,20 +1595,28 @@ class _MyHomePageState extends State<MyHomePage> {
     required String initialName,
     required List<ProteinType> initialProteins,
     required List<String> initialIngredients,
+    required int initialDefaultPortions,
   }) async {
     String draftName = initialName;
     final Set<ProteinType> selectedProteins = Set<ProteinType>.from(
       initialProteins,
     );
     String ingredientsInput = initialIngredients.join('\n');
+    String defaultPortionsInput = initialDefaultPortions.toString();
+    String? defaultPortionsError;
 
     return showDialog<DishEditorResult>(
       context: context,
       builder: (BuildContext context) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setDialogState) {
+            final int? parsedDefaultPortions = _parsePositiveInt(
+              defaultPortionsInput,
+            );
             final bool canAdd =
-                draftName.trim().isNotEmpty && selectedProteins.isNotEmpty;
+                draftName.trim().isNotEmpty &&
+                selectedProteins.isNotEmpty &&
+                parsedDefaultPortions != null;
 
             return AlertDialog(
               title: Text(title),
@@ -1122,6 +1652,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                   .where(selectedProteins.contains)
                                   .toList(growable: false),
                               ingredients: _parseIngredients(ingredientsInput),
+                              defaultPortions: parsedDefaultPortions,
                             ),
                           );
                         },
@@ -1153,6 +1684,23 @@ class _MyHomePageState extends State<MyHomePage> {
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
+                        key: const ValueKey<String>('default_portions_field'),
+                        initialValue: defaultPortionsInput,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'Recipe portions',
+                          hintText: 'e.g. 4',
+                          errorText: defaultPortionsError,
+                        ),
+                        onChanged: (String value) {
+                          setDialogState(() {
+                            defaultPortionsInput = value;
+                            defaultPortionsError = null;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
                         key: const ValueKey<String>('ingredients_field'),
                         initialValue: ingredientsInput,
                         minLines: 2,
@@ -1160,8 +1708,7 @@ class _MyHomePageState extends State<MyHomePage> {
                         textInputAction: TextInputAction.newline,
                         decoration: const InputDecoration(
                           labelText: 'Ingredients',
-                          hintText:
-                              'One per line or comma separated, e.g. tomato',
+                          hintText: 'One per line, e.g. 500g minced meat',
                         ),
                         onChanged: (String value) {
                           ingredientsInput = value;
@@ -1180,6 +1727,16 @@ class _MyHomePageState extends State<MyHomePage> {
                   onPressed: !canAdd
                       ? null
                       : () {
+                          final int? validatedPortions = _parsePositiveInt(
+                            defaultPortionsInput,
+                          );
+                          if (validatedPortions == null) {
+                            setDialogState(() {
+                              defaultPortionsError =
+                                  'Enter a whole number above 0';
+                            });
+                            return;
+                          }
                           Navigator.of(context).pop(
                             DishEditorResult(
                               name: draftName.trim(),
@@ -1187,6 +1744,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                   .where(selectedProteins.contains)
                                   .toList(growable: false),
                               ingredients: _parseIngredients(ingredientsInput),
+                              defaultPortions: validatedPortions,
                             ),
                           );
                         },
@@ -1207,6 +1765,7 @@ class _MyHomePageState extends State<MyHomePage> {
       initialName: '',
       initialProteins: const <ProteinType>[],
       initialIngredients: const <String>[],
+      initialDefaultPortions: 4,
     );
 
     if (value == null) {
@@ -1219,6 +1778,7 @@ class _MyHomePageState extends State<MyHomePage> {
           name: value.name,
           proteins: value.proteins,
           ingredients: value.ingredients,
+          defaultPortions: value.defaultPortions,
         ),
       );
       _sortFoodItemsByRanking();
@@ -1238,6 +1798,7 @@ class _MyHomePageState extends State<MyHomePage> {
       initialName: item.name,
       initialProteins: item.proteins,
       initialIngredients: item.ingredients,
+      initialDefaultPortions: item.defaultPortions,
     );
     if (edited == null) {
       return;
@@ -1249,6 +1810,7 @@ class _MyHomePageState extends State<MyHomePage> {
         name: edited.name,
         proteins: edited.proteins,
         ingredients: edited.ingredients,
+        defaultPortions: edited.defaultPortions,
       );
       _sortFoodItemsByRanking();
     });
@@ -1417,30 +1979,78 @@ class _MyHomePageState extends State<MyHomePage> {
         ),
       );
     } else if (_foodItems.isEmpty) {
-      body = const Center(child: Text('No food items yet. Tap + to add one.'));
+      body = Column(
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                key: const ValueKey<String>('open_grocery_trip_button'),
+                onPressed: _openGroceryTrip,
+                icon: const Icon(Icons.shopping_cart_checkout),
+                label: const Text('Grocery trip'),
+              ),
+            ),
+          ),
+          const Expanded(
+            child: Center(child: Text('No food items yet. Tap + to add one.')),
+          ),
+        ],
+      );
     } else {
       final List<FoodItem> visibleFoodItems = _filteredFoodItems();
       if (visibleFoodItems.isEmpty) {
-        body = Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              const Text('No dishes match current filters.'),
-              const SizedBox(height: 12),
-              OutlinedButton(
-                onPressed: () {
-                  setState(() {
-                    _activeFilter = DishFilter.empty;
-                  });
-                },
-                child: const Text('Clear filters'),
+        body = Column(
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  key: const ValueKey<String>('open_grocery_trip_button'),
+                  onPressed: _openGroceryTrip,
+                  icon: const Icon(Icons.shopping_cart_checkout),
+                  label: const Text('Grocery trip'),
+                ),
               ),
-            ],
-          ),
+            ),
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    const Text('No dishes match current filters.'),
+                    const SizedBox(height: 12),
+                    OutlinedButton(
+                      onPressed: () {
+                        setState(() {
+                          _activeFilter = DishFilter.empty;
+                        });
+                      },
+                      child: const Text('Clear filters'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         );
       } else {
         body = Column(
           children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  key: const ValueKey<String>('open_grocery_trip_button'),
+                  onPressed: _openGroceryTrip,
+                  icon: const Icon(Icons.shopping_cart_checkout),
+                  label: const Text('Grocery trip'),
+                ),
+              ),
+            ),
             if (_activeFilter.hasActiveFilters)
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -1494,6 +2104,8 @@ class _MyHomePageState extends State<MyHomePage> {
                           Text(_averageRatingText(item)),
                           const SizedBox(height: 2),
                           Text(_averageDurationText(item)),
+                          const SizedBox(height: 2),
+                          Text('Recipe portions: ${item.defaultPortions}'),
                           const SizedBox(height: 2),
                           if (item.ingredients.isEmpty)
                             const Text('No ingredients listed')
@@ -1563,6 +2175,649 @@ class _MyHomePageState extends State<MyHomePage> {
               tooltip: 'Add food item',
               child: const Icon(Icons.add),
             ),
+    );
+  }
+}
+
+class GroceryTripPage extends StatefulWidget {
+  const GroceryTripPage({super.key});
+
+  static const String routeName = '/grocery-trip';
+
+  @override
+  State<GroceryTripPage> createState() => _GroceryTripPageState();
+}
+
+class _GroceryTripPageState extends State<GroceryTripPage> {
+  final FoodDataStore _dataStore = FoodDataStore();
+  final List<FoodItem> _foodItems = <FoodItem>[];
+  final Map<String, GroceryTripDishSelection> _selectedDishes =
+      <String, GroceryTripDishSelection>{};
+  final Map<String, TextEditingController> _portionControllers =
+      <String, TextEditingController>{};
+
+  bool _isLoading = true;
+  String? _loadError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFoodItems();
+  }
+
+  @override
+  void dispose() {
+    for (final TextEditingController controller in _portionControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _loadFoodItems() async {
+    try {
+      final List<FoodItem> loadedItems = await _dataStore.load();
+      loadedItems.sort((FoodItem a, FoodItem b) {
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      });
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _foodItems
+          ..clear()
+          ..addAll(loadedItems);
+        _isLoading = false;
+        _loadError = null;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _loadError = 'Could not load dishes for the grocery trip.';
+      });
+    }
+  }
+
+  bool _isSelected(FoodItem item) => _selectedDishes.containsKey(item.name);
+
+  TextEditingController _controllerFor(FoodItem item) {
+    return _portionControllers.putIfAbsent(item.name, () {
+      final int portions =
+          _selectedDishes[item.name]?.portions ?? item.defaultPortions;
+      return TextEditingController(text: portions.toString());
+    });
+  }
+
+  void _toggleDishSelection(FoodItem item) {
+    setState(() {
+      if (_isSelected(item)) {
+        _selectedDishes.remove(item.name);
+        _portionControllers.remove(item.name)?.dispose();
+        return;
+      }
+
+      final GroceryTripDishSelection selection = GroceryTripDishSelection(
+        item: item,
+        portions: item.defaultPortions,
+      );
+      _selectedDishes[item.name] = selection;
+      _controllerFor(item).text = item.defaultPortions.toString();
+    });
+  }
+
+  void _changePortions(FoodItem item, int nextValue) {
+    if (nextValue <= 0 || !_isSelected(item)) {
+      return;
+    }
+
+    setState(() {
+      final GroceryTripDishSelection current = _selectedDishes[item.name]!;
+      _selectedDishes[item.name] = current.copyWith(portions: nextValue);
+      _controllerFor(item).text = nextValue.toString();
+    });
+  }
+
+  void _setPortionsFromInput(FoodItem item, String value) {
+    if (!_isSelected(item)) {
+      return;
+    }
+
+    final int? parsed = int.tryParse(value.trim());
+    if (parsed == null || parsed <= 0) {
+      return;
+    }
+
+    setState(() {
+      final GroceryTripDishSelection current = _selectedDishes[item.name]!;
+      _selectedDishes[item.name] = current.copyWith(portions: parsed);
+    });
+  }
+
+  double _portionFactor(GroceryTripDishSelection selection) {
+    final int basePortions = selection.item.defaultPortions;
+    if (basePortions <= 0) {
+      return 1;
+    }
+    return selection.portions / basePortions;
+  }
+
+  _ParsedIngredient? _parseIngredientLine(String value) {
+    final String input = _normalizeFractionCharacters(value.trim());
+    if (input.isEmpty) {
+      return null;
+    }
+
+    final RegExp amountPattern = RegExp(
+      r'^((?:\d+/\d+|\d+(?:[.,]\d+)?)(?:\s+\d+/\d+)?)\s*(.+)$',
+    );
+    final RegExpMatch? amountMatch = amountPattern.firstMatch(input);
+    if (amountMatch == null) {
+      return null;
+    }
+
+    final double? amount = _parseAmount(amountMatch.group(1)!);
+    if (amount == null) {
+      return null;
+    }
+
+    final String remainder = amountMatch.group(2)!.trim();
+    if (remainder.isEmpty) {
+      return null;
+    }
+
+    final List<String> tokens = remainder.split(RegExp(r'\s+'));
+    final String firstToken = tokens.first;
+    final _IngredientUnit? unit = _IngredientUnit.fromToken(firstToken);
+    if (unit != null) {
+      final String name = remainder.substring(firstToken.length).trim();
+      if (name.isEmpty) {
+        return null;
+      }
+      return _ParsedIngredient(
+        baseAmount: amount * unit.factorToBase,
+        displayName: name,
+        normalizedName: _normalizeIngredientName(name),
+        unit: unit,
+      );
+    }
+
+    return _ParsedIngredient(
+      baseAmount: amount,
+      displayName: _ParsedIngredient.singularizePhrase(remainder),
+      normalizedName: _normalizeIngredientName(remainder),
+    );
+  }
+
+  double? _parseAmount(String rawAmount) {
+    final List<String> parts = rawAmount
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((String part) => part.isNotEmpty)
+        .toList(growable: false);
+    if (parts.isEmpty) {
+      return null;
+    }
+
+    double total = 0;
+    for (final String part in parts) {
+      if (part.contains('/')) {
+        final List<String> fractionParts = part.split('/');
+        if (fractionParts.length != 2) {
+          return null;
+        }
+        final double? numerator = double.tryParse(
+          fractionParts[0].replaceAll(',', '.'),
+        );
+        final double? denominator = double.tryParse(
+          fractionParts[1].replaceAll(',', '.'),
+        );
+        if (numerator == null || denominator == null || denominator == 0) {
+          return null;
+        }
+        total += numerator / denominator;
+        continue;
+      }
+
+      final double? value = double.tryParse(part.replaceAll(',', '.'));
+      if (value == null) {
+        return null;
+      }
+      total += value;
+    }
+    return total;
+  }
+
+  String _normalizeFractionCharacters(String value) {
+    const Map<String, String> replacements = <String, String>{
+      '¼': '1/4',
+      '½': '1/2',
+      '¾': '3/4',
+      '⅐': '1/7',
+      '⅑': '1/9',
+      '⅒': '1/10',
+      '⅓': '1/3',
+      '⅔': '2/3',
+      '⅕': '1/5',
+      '⅖': '2/5',
+      '⅗': '3/5',
+      '⅘': '4/5',
+      '⅙': '1/6',
+      '⅚': '5/6',
+      '⅛': '1/8',
+      '⅜': '3/8',
+      '⅝': '5/8',
+      '⅞': '7/8',
+    };
+
+    final StringBuffer buffer = StringBuffer();
+    for (int index = 0; index < value.length; index++) {
+      final String char = value[index];
+      final String? replacement = replacements[char];
+      if (replacement == null) {
+        buffer.write(char);
+        continue;
+      }
+
+      if (index > 0 && RegExp(r'\d').hasMatch(value[index - 1])) {
+        buffer.write(' ');
+      }
+      buffer.write(replacement);
+    }
+    return buffer.toString();
+  }
+
+  String _normalizeIngredientName(String value) {
+    final String normalized = value.trim().toLowerCase().replaceAll(
+      RegExp(r'\s+'),
+      ' ',
+    );
+    return _ParsedIngredient.singularizePhrase(normalized);
+  }
+
+  List<GroceryListItem> _buildGroceryListItems() {
+    final Map<String, _IngredientAccumulator> scalableItems =
+        <String, _IngredientAccumulator>{};
+    final Map<String, int> textCounts = <String, int>{};
+    final Map<String, String> textLabels = <String, String>{};
+
+    for (final GroceryTripDishSelection selection in _selectedDishes.values) {
+      final double factor = _portionFactor(selection);
+      for (final String ingredient in selection.item.ingredients) {
+        final _ParsedIngredient? parsed = _parseIngredientLine(ingredient);
+        if (parsed != null) {
+          final _IngredientAccumulator accumulator = scalableItems.putIfAbsent(
+            parsed.normalizedKey,
+            () => _IngredientAccumulator(parsed),
+          );
+          accumulator.totalAmount += parsed.baseAmount * factor;
+          continue;
+        }
+
+        final String normalized = ingredient.toLowerCase();
+        textLabels.putIfAbsent(normalized, () => ingredient);
+        textCounts.update(
+          normalized,
+          (int count) => count + 1,
+          ifAbsent: () {
+            return 1;
+          },
+        );
+      }
+    }
+
+    final List<GroceryListItem> result = <GroceryListItem>[
+      ...scalableItems.values.map((_IngredientAccumulator accumulator) {
+        return GroceryListItem(
+          label: accumulator.template.formatWithAmount(accumulator.totalAmount),
+          normalizedKey: accumulator.template.normalizedKey,
+        );
+      }),
+      ...textCounts.entries.map((MapEntry<String, int> entry) {
+        final String label = textLabels[entry.key]!;
+        if (entry.value <= 1) {
+          return GroceryListItem(label: label, normalizedKey: entry.key);
+        }
+        return GroceryListItem(
+          label: '${entry.value} x $label',
+          normalizedKey: entry.key,
+        );
+      }),
+    ];
+
+    result.sort((GroceryListItem a, GroceryListItem b) {
+      return a.label.toLowerCase().compareTo(b.label.toLowerCase());
+    });
+    return result;
+  }
+
+  String _selectedIngredientsText(Map<String, bool> checkedItems) {
+    final List<String> lines = _buildGroceryListItems()
+        .where((GroceryListItem item) => checkedItems[item.label] ?? false)
+        .map((GroceryListItem item) => item.label)
+        .toList(growable: false);
+    return lines.join('\n');
+  }
+
+  Future<void> _showIngredientListDialog() async {
+    final List<GroceryListItem> items = _buildGroceryListItems();
+    if (items.isEmpty) {
+      return;
+    }
+
+    final Map<String, bool> checkedItems = <String, bool>{
+      for (final GroceryListItem item in items) item.label: true,
+    };
+
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setDialogState) {
+            final String outputText = _selectedIngredientsText(checkedItems);
+
+            Future<void> copySelectedItems() async {
+              if (outputText.isEmpty) {
+                return;
+              }
+              await Clipboard.setData(ClipboardData(text: outputText));
+              if (!context.mounted) {
+                return;
+              }
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Selected ingredients copied as text.'),
+                ),
+              );
+            }
+
+            return AlertDialog(
+              title: const Text('Ingredients list'),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Flexible(
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: items
+                            .map((GroceryListItem item) {
+                              return CheckboxListTile(
+                                key: ValueKey<String>(
+                                  'grocery_item_${item.label}',
+                                ),
+                                value: checkedItems[item.label] ?? false,
+                                title: Text(item.label),
+                                contentPadding: EdgeInsets.zero,
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                                onChanged: (bool? value) {
+                                  setDialogState(() {
+                                    checkedItems[item.label] = value ?? false;
+                                  });
+                                },
+                              );
+                            })
+                            .toList(growable: false),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text('Copy this into Microsoft To Do'),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surfaceContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: SelectableText(
+                        outputText.isEmpty
+                            ? 'No ingredients selected.'
+                            : outputText,
+                        key: const ValueKey<String>(
+                          'selected_ingredients_text',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Close'),
+                ),
+                if (supportsTextFileDownload)
+                  TextButton(
+                    onPressed: outputText.isEmpty
+                        ? null
+                        : () {
+                            final bool didDownload = downloadTextFile(
+                              filename: 'grocery-list.txt',
+                              contents: outputText,
+                            );
+                            if (!didDownload) {
+                              return;
+                            }
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Downloaded grocery-list.txt'),
+                              ),
+                            );
+                          },
+                    child: const Text('Download .txt'),
+                  ),
+                FilledButton(
+                  onPressed: outputText.isEmpty ? null : copySelectedItems,
+                  child: const Text('Copy selected'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  List<GroceryTripDishSelection> _currentSelections() {
+    return _selectedDishes.values.toList(growable: false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget body;
+    if (_isLoading) {
+      body = const Center(child: CircularProgressIndicator());
+    } else if (_loadError != null) {
+      body = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(_loadError!),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: () {
+                setState(() {
+                  _isLoading = true;
+                  _loadError = null;
+                });
+                _loadFoodItems();
+              },
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    } else if (_foodItems.isEmpty) {
+      body = const Center(
+        child: Text('Add dishes before planning a grocery trip.'),
+      );
+    } else {
+      final List<GroceryTripDishSelection> selections = _currentSelections();
+      final List<GroceryListItem> groceryItems = _buildGroceryListItems();
+
+      body = Column(
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Selected dishes: ${selections.length}',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      selections.isEmpty
+                          ? 'Pick dishes below. Each selected dish starts with its saved recipe portions.'
+                          : selections
+                                .map((GroceryTripDishSelection selection) {
+                                  return '${selection.item.name} (${selection.portions})';
+                                })
+                                .join(', '),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        key: const ValueKey<String>(
+                          'get_ingredients_list_button',
+                        ),
+                        onPressed: groceryItems.isEmpty
+                            ? null
+                            : _showIngredientListDialog,
+                        child: const Text('Get ingredients list'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: _foodItems.length,
+              itemBuilder: (BuildContext context, int index) {
+                final FoodItem item = _foodItems[index];
+                final bool selected = _isSelected(item);
+                final GroceryTripDishSelection? selection =
+                    _selectedDishes[item.name];
+                final TextEditingController? controller = selected
+                    ? _controllerFor(item)
+                    : null;
+
+                return Card(
+                  key: ValueKey<String>('grocery_dish_${item.name}'),
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
+                          children: <Widget>[
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(
+                                    item.name,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleMedium,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Recipe portions: ${item.defaultPortions}',
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    item.ingredients.isEmpty
+                                        ? 'No ingredients listed'
+                                        : item.ingredients.join(', '),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            FilledButton.tonalIcon(
+                              key: ValueKey<String>(
+                                'grocery_toggle_${item.name}',
+                              ),
+                              onPressed: () => _toggleDishSelection(item),
+                              icon: Icon(
+                                selected
+                                    ? Icons.check_circle
+                                    : Icons.add_circle,
+                              ),
+                              label: Text(selected ? 'Selected' : 'Add'),
+                            ),
+                          ],
+                        ),
+                        if (selected && selection != null) ...<Widget>[
+                          const SizedBox(height: 12),
+                          Row(
+                            children: <Widget>[
+                              IconButton(
+                                onPressed: selection.portions <= 1
+                                    ? null
+                                    : () => _changePortions(
+                                        item,
+                                        selection.portions - 1,
+                                      ),
+                                icon: const Icon(Icons.remove_circle_outline),
+                              ),
+                              SizedBox(
+                                width: 96,
+                                child: TextField(
+                                  key: ValueKey<String>(
+                                    'grocery_portions_${item.name}',
+                                  ),
+                                  controller: controller,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Portions',
+                                  ),
+                                  onChanged: (String value) {
+                                    _setPortionsFromInput(item, value);
+                                  },
+                                ),
+                              ),
+                              IconButton(
+                                onPressed: () => _changePortions(
+                                  item,
+                                  selection.portions + 1,
+                                ),
+                                icon: const Icon(Icons.add_circle_outline),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Grocery trip')),
+      body: body,
     );
   }
 }
