@@ -5,6 +5,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+String _weekStartKey(DateTime value) {
+  final DateTime localMidnight = DateTime(value.year, value.month, value.day);
+  final int daysFromMonday = localMidnight.weekday - DateTime.monday;
+  final DateTime monday = localMidnight.subtract(
+    Duration(days: daysFromMonday),
+  );
+  final String month = monday.month.toString().padLeft(2, '0');
+  final String day = monday.day.toString().padLeft(2, '0');
+  return '${monday.year}-$month-$day';
+}
+
 void main() {
   testWidgets('Adds a food item with proteins and baseline stats', (
     WidgetTester tester,
@@ -23,24 +34,32 @@ void main() {
       find.byKey(const ValueKey<String>('dish_name_field')),
       'Apples',
     );
-    await tester.enterText(
-      find.byKey(const ValueKey<String>('ingredients_field')),
-      'Apple\nCinnamon',
-    );
     await tester.tap(find.widgetWithText(FilterChip, 'Chicken'));
     await tester.tap(find.widgetWithText(FilterChip, 'Egg'));
     await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('ingredient_name_0')),
+      'Apple',
+    );
+    await tester.ensureVisible(find.text('Add row'));
+    await tester.tap(find.text('Add row'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('ingredient_name_1')),
+      'Cinnamon',
+    );
     await tester.tap(find.text('Add'));
     await tester.pumpAndSettle();
 
     expect(find.text('Apples'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey<String>('dish_card_Apples')));
+    await tester.pumpAndSettle();
     expect(find.text('Chicken'), findsOneWidget);
     expect(find.text('Egg'), findsOneWidget);
     expect(find.text('Cooked 0 times'), findsOneWidget);
     expect(find.text('No ratings yet'), findsOneWidget);
     expect(find.text('No cooking time logged'), findsOneWidget);
-    expect(find.text('Recipe portions: 4'), findsOneWidget);
-    expect(find.text('Ingredients: Apple, Cinnamon'), findsOneWidget);
+    expect(find.text('Apple, Cinnamon'), findsOneWidget);
   });
 
   testWidgets('Dish menu logs rating/time and updates ranking', (
@@ -84,21 +103,19 @@ void main() {
 
     expect(pastaY(), greaterThan(soupY()));
 
-    await tester.tap(find.byKey(const ValueKey<String>('dish_card_Pasta')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('I cooked this'));
+    await tester.tap(find.byKey(const ValueKey<String>('dish_log_Pasta')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '30');
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey<String>('dish_card_Pasta')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('I cooked this'));
+    await tester.tap(find.byKey(const ValueKey<String>('dish_log_Pasta')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const ValueKey<String>('dish_card_Pasta')));
+    await tester.pumpAndSettle();
     expect(find.text('Cooked 2 times'), findsOneWidget);
     expect(find.text('Avg rating: 3.0/5'), findsOneWidget);
     expect(find.text('Avg time: 30.0 min'), findsOneWidget);
@@ -159,9 +176,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilterChip, 'Fish'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey<String>('min_rating_dropdown')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('4.0+').last);
+    await tester.drag(
+      find.byKey(const ValueKey<String>('min_rating_slider')),
+      const Offset(240, 0),
+    );
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey<String>('min_time_field')),
@@ -201,7 +219,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey<String>('dish_card_Soup')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Edit dish'));
+    await tester.tap(find.byKey(const ValueKey<String>('dish_edit_Soup')));
     await tester.pumpAndSettle();
 
     await tester.enterText(
@@ -209,8 +227,22 @@ void main() {
       'Tomato Soup',
     );
     await tester.enterText(
-      find.byKey(const ValueKey<String>('ingredients_field')),
-      'Tomato\nOnion\nGarlic',
+      find.byKey(const ValueKey<String>('ingredient_name_0')),
+      'Tomato',
+    );
+    await tester.ensureVisible(find.text('Add row'));
+    await tester.tap(find.text('Add row'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('ingredient_name_1')),
+      'Onion',
+    );
+    await tester.ensureVisible(find.text('Add row'));
+    await tester.tap(find.text('Add row'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('ingredient_name_2')),
+      'Garlic',
     );
     await tester.enterText(
       find.byKey(const ValueKey<String>('default_portions_field')),
@@ -221,8 +253,11 @@ void main() {
 
     expect(find.text('Tomato Soup'), findsOneWidget);
     expect(find.text('Soup'), findsNothing);
-    expect(find.text('Recipe portions: 6'), findsOneWidget);
-    expect(find.text('Ingredients: Tomato, Onion, Garlic'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey<String>('dish_card_Tomato Soup')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Tomato, Onion, Garlic'), findsOneWidget);
 
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final String? stored = prefs.getString('family_eating.food_data');
@@ -236,7 +271,11 @@ void main() {
     );
     expect(firstItem['name'], 'Tomato Soup');
     expect(firstItem['defaultPortions'], 6);
-    expect(firstItem['ingredients'], <String>['Tomato', 'Onion', 'Garlic']);
+    expect(firstItem['ingredients'], <Map<String, dynamic>>[
+      <String, dynamic>{'name': 'Tomato', 'amount': null, 'unitKey': null},
+      <String, dynamic>{'name': 'Onion', 'amount': null, 'unitKey': null},
+      <String, dynamic>{'name': 'Garlic', 'amount': null, 'unitKey': null},
+    ]);
   });
 
   testWidgets('Grocery trip builds copyable ingredient list from selections', (
@@ -309,6 +348,329 @@ void main() {
     expect(output.data, contains('4 onions'));
     expect(output.data, contains('Salt'));
     expect(output.data, isNot(contains('Pepper')));
+  });
+
+  testWidgets('Week plan persists cooked state and prefills grocery trip', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'family_eating.food_data': jsonEncode(<String, dynamic>{
+        'schemaVersion': 9,
+        'foodItems': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'name': 'Bolognese',
+            'proteins': <String>['meat'],
+            'defaultPortions': 4,
+            'ingredients': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'name': 'minced meat',
+                'amount': 500,
+                'unitKey': 'g',
+              },
+            ],
+            'cookingLogs': <Map<String, dynamic>>[],
+          },
+          <String, dynamic>{
+            'name': 'Soup',
+            'proteins': <String>['fish'],
+            'defaultPortions': 2,
+            'ingredients': <Map<String, dynamic>>[
+              <String, dynamic>{'name': 'onion', 'amount': 2, 'unitKey': null},
+            ],
+            'cookingLogs': <Map<String, dynamic>>[],
+          },
+        ],
+        'routineItems': <Map<String, dynamic>>[],
+        'weekPlan': <String, dynamic>{
+          'entries': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'dishName': 'Bolognese',
+              'portions': 8,
+              'isCooked': false,
+            },
+            <String, dynamic>{
+              'dishName': 'Soup',
+              'portions': 2,
+              'isCooked': false,
+            },
+          ],
+        },
+      }),
+    });
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('week_entry_Bolognese')),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey<String>('week_entry_Bolognese')),
+    );
+    await tester.pumpAndSettle();
+
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String stored = prefs.getString('family_eating.food_data')!;
+    final Map<String, dynamic> payload = Map<String, dynamic>.from(
+      jsonDecode(stored) as Map,
+    );
+    final List<dynamic> weekPlans = payload['weekPlans'] as List<dynamic>;
+    final Map<String, dynamic> weekPlan = Map<String, dynamic>.from(
+      weekPlans.first as Map,
+    );
+    final List<dynamic> entries = weekPlan['entries'] as List<dynamic>;
+    final Map<String, dynamic> bologneseEntry = Map<String, dynamic>.from(
+      entries.first as Map,
+    );
+    expect(bologneseEntry['isCooked'], true);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('week_grocery_trip_button')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Selected dishes: 2'), findsOneWidget);
+    expect(find.text('Selected'), findsNWidgets(2));
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('get_ingredients_list_button')),
+    );
+    await tester.pumpAndSettle();
+
+    final SelectableText output = tester.widget<SelectableText>(
+      find.byKey(const ValueKey<String>('selected_ingredients_text')),
+    );
+    expect(output.data, contains('1kg minced meat'));
+    expect(output.data, contains('2 onions'));
+  });
+
+  testWidgets('Right swipe adds a dish to This week plan', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'family_eating.food_data': jsonEncode(<String, dynamic>{
+        'schemaVersion': 10,
+        'foodItems': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'name': 'Swipe Dish',
+            'proteins': <String>['egg'],
+            'ingredients': <Map<String, dynamic>>[],
+            'cookingLogs': <Map<String, dynamic>>[],
+            'defaultPortions': 3,
+          },
+        ],
+        'routineItems': <Map<String, dynamic>>[],
+        'weekPlans': <Map<String, dynamic>>[],
+      }),
+    });
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    await tester.fling(
+      find.byKey(const ValueKey<String>('dish_card_Swipe Dish')),
+      const Offset(300, 0),
+      1000,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Added Swipe Dish to This week.'), findsOneWidget);
+
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String stored = prefs.getString('family_eating.food_data')!;
+    final Map<String, dynamic> payload = Map<String, dynamic>.from(
+      jsonDecode(stored) as Map,
+    );
+    final List<dynamic> weekPlans = payload['weekPlans'] as List<dynamic>;
+    expect(weekPlans, hasLength(1));
+    final Map<String, dynamic> firstPlan = Map<String, dynamic>.from(
+      weekPlans.first as Map,
+    );
+    final List<dynamic> entries = firstPlan['entries'] as List<dynamic>;
+    expect(entries, hasLength(1));
+    expect(
+      Map<String, dynamic>.from(entries.first as Map)['dishName'],
+      'Swipe Dish',
+    );
+  });
+
+  testWidgets('Can navigate between saved weeks', (WidgetTester tester) async {
+    final String currentWeek = _weekStartKey(DateTime.now());
+    final String previousWeek = _weekStartKey(
+      DateTime.now().subtract(const Duration(days: 7)),
+    );
+
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'family_eating.food_data': jsonEncode(<String, dynamic>{
+        'schemaVersion': 10,
+        'foodItems': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'name': 'Current Dish',
+            'proteins': <String>['egg'],
+            'ingredients': <Map<String, dynamic>>[],
+            'cookingLogs': <Map<String, dynamic>>[],
+            'defaultPortions': 4,
+          },
+          <String, dynamic>{
+            'name': 'Previous Dish',
+            'proteins': <String>['fish'],
+            'ingredients': <Map<String, dynamic>>[],
+            'cookingLogs': <Map<String, dynamic>>[],
+            'defaultPortions': 2,
+          },
+        ],
+        'routineItems': <Map<String, dynamic>>[],
+        'weekPlans': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'weekStart': currentWeek,
+            'entries': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'dishName': 'Current Dish',
+                'portions': 4,
+                'isCooked': false,
+              },
+            ],
+          },
+          <String, dynamic>{
+            'weekStart': previousWeek,
+            'entries': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'dishName': 'Previous Dish',
+                'portions': 2,
+                'isCooked': true,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('week_entry_Current Dish')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('week_entry_Previous Dish')),
+      findsNothing,
+    );
+
+    await tester.tap(find.byTooltip('Previous week'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Last week'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('week_entry_Previous Dish')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('week_entry_Current Dish')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('Week planner reuses full filtering interface', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'family_eating.food_data': jsonEncode(<String, dynamic>{
+        'schemaVersion': 10,
+        'foodItems': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'name': 'Fish Curry',
+            'proteins': <String>['fish'],
+            'ingredients': <Map<String, dynamic>>[],
+            'defaultPortions': 4,
+            'cookingLogs': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'cookedAt': '2026-03-08T10:00:00.000Z',
+                'rating': 4.5,
+                'durationMinutes': 40,
+              },
+            ],
+          },
+          <String, dynamic>{
+            'name': 'Chicken Pasta',
+            'proteins': <String>['chicken'],
+            'ingredients': <Map<String, dynamic>>[],
+            'defaultPortions': 4,
+            'cookingLogs': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'cookedAt': '2026-03-08T11:00:00.000Z',
+                'rating': 3.5,
+                'durationMinutes': 25,
+              },
+            ],
+          },
+        ],
+        'routineItems': <Map<String, dynamic>>[],
+        'weekPlans': <Map<String, dynamic>>[],
+      }),
+    });
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Filter'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilterChip, 'Fish'));
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const ValueKey<String>('min_rating_slider')),
+      const Offset(240, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('min_time_field')),
+      '30',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('max_time_field')),
+      '50',
+    );
+    await tester.tap(find.text('Apply'));
+    await tester.pumpAndSettle();
+
+    final Finder dialogFinder = find.byType(AlertDialog).first;
+    expect(
+      find.descendant(of: dialogFinder, matching: find.text('Fish Curry')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: dialogFinder, matching: find.text('Chicken Pasta')),
+      findsNothing,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('week_planner_select_Fish Curry')),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Filter'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Clear').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Filter'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilterChip, 'Chicken'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Apply'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(of: dialogFinder, matching: find.text('Fish Curry')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: dialogFinder, matching: find.text('Chicken Pasta')),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
@@ -398,10 +760,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Legacy Soup'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey<String>('dish_card_Legacy Soup')),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Cooked 0 times'), findsOneWidget);
     expect(find.text('No ratings yet'), findsOneWidget);
     expect(find.text('No cooking time logged'), findsOneWidget);
-    expect(find.text('No proteins selected'), findsOneWidget);
 
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final String? migrated = prefs.getString('family_eating.food_data');
@@ -433,6 +798,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Old Dish'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey<String>('dish_card_Old Dish')));
+    await tester.pumpAndSettle();
     expect(find.text('Cooked 0 times'), findsOneWidget);
 
     final SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -471,6 +838,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Old Favorite'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey<String>('dish_card_Old Favorite')),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Cooked 2 times'), findsOneWidget);
 
     final SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -509,6 +880,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Legacy Four'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey<String>('dish_card_Legacy Four')),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('No ingredients listed'), findsOneWidget);
 
     final SharedPreferences prefs = await SharedPreferences.getInstance();

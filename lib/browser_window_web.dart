@@ -10,6 +10,11 @@ bool openRouteInNewWindow(String route, {String windowName = 'grocery-trip'}) {
   return true;
 }
 
+bool openExternalUrl(String url, {String windowName = '_blank'}) {
+  html.window.open(url, windowName);
+  return true;
+}
+
 bool downloadTextFile({required String filename, required String contents}) {
   final html.Blob blob = html.Blob(<String>[
     contents,
