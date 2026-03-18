@@ -94,6 +94,12 @@ void main() {
     await tester.pumpWidget(const MyApp());
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey<String>('dish_card_Soup')),
+      200,
+    );
+    await tester.pumpAndSettle();
+
     double pastaY() => tester
         .getTopLeft(find.byKey(const ValueKey<String>('dish_card_Pasta')))
         .dy;
@@ -119,6 +125,11 @@ void main() {
     expect(find.text('Cooked 2 times'), findsOneWidget);
     expect(find.text('Avg rating: 3.0/5'), findsOneWidget);
     expect(find.text('Avg time: 30.0 min'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey<String>('dish_card_Soup')),
+      200,
+    );
+    await tester.pumpAndSettle();
     expect(pastaY(), lessThan(soupY()));
   });
 
@@ -961,6 +972,79 @@ void main() {
       expect(output.data, contains('5.5dl cream'));
     },
   );
+
+  testWidgets('Groceries tab persists checklist items and clears completed', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Groceries'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('grocery_checklist_field')),
+      'Milk',
+    );
+    await tester.tap(
+      find.byKey(const ValueKey<String>('grocery_checklist_add_button')),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('grocery_checklist_field')),
+      'Bread',
+    );
+    await tester.tap(
+      find.byKey(const ValueKey<String>('grocery_checklist_add_button')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Milk'), findsOneWidget);
+    expect(find.text('Bread'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('grocery_checklist_item_Milk')),
+    );
+    await tester.pumpAndSettle();
+
+    final double breadY = tester
+        .getTopLeft(
+          find.byKey(const ValueKey<String>('grocery_checklist_item_Bread')),
+        )
+        .dy;
+    final double milkY = tester
+        .getTopLeft(
+          find.byKey(const ValueKey<String>('grocery_checklist_item_Milk')),
+        )
+        .dy;
+    expect(breadY, lessThan(milkY));
+
+    await tester.tap(
+      find.byKey(
+        const ValueKey<String>('clear_completed_grocery_items_button'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Milk'), findsNothing);
+    expect(find.text('Bread'), findsOneWidget);
+
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String stored = prefs.getString('family_eating.food_data')!;
+    final Map<String, dynamic> payload = Map<String, dynamic>.from(
+      jsonDecode(stored) as Map,
+    );
+    final List<dynamic> groceryChecklistItems =
+        payload['groceryChecklistItems'] as List<dynamic>;
+    expect(groceryChecklistItems, hasLength(1));
+    expect(
+      Map<String, dynamic>.from(groceryChecklistItems.first as Map)['label'],
+      'Bread',
+    );
+  });
 
   testWidgets('Migrates legacy food names automatically', (
     WidgetTester tester,

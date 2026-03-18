@@ -60,11 +60,13 @@ class FamilyEatingData {
     this.foodItems = const <FoodItem>[],
     this.routineItems = const <RoutineFoodItem>[],
     this.weekPlans = const <WeekPlan>[],
+    this.groceryChecklistItems = const <GroceryChecklistItem>[],
   });
 
   final List<FoodItem> foodItems;
   final List<RoutineFoodItem> routineItems;
   final List<WeekPlan> weekPlans;
+  final List<GroceryChecklistItem> groceryChecklistItems;
 }
 
 class FoodItem {
@@ -405,6 +407,40 @@ class RoutineFoodItem {
     return RoutineFoodItem(
       id: id ?? this.id,
       ingredient: ingredient ?? this.ingredient,
+    );
+  }
+}
+
+class GroceryChecklistItem {
+  const GroceryChecklistItem({
+    required this.id,
+    required this.label,
+    this.isChecked = false,
+  });
+
+  final String id;
+  final String label;
+  final bool isChecked;
+
+  factory GroceryChecklistItem.fromJson(Map<String, dynamic> json) {
+    final String id = (json['id'] ?? '').toString().trim();
+    final String label = (json['label'] ?? '').toString().trim();
+    return GroceryChecklistItem(
+      id: id.isEmpty ? _createLocalId() : id,
+      label: label,
+      isChecked: json['isChecked'] == true,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{'id': id, 'label': label, 'isChecked': isChecked};
+  }
+
+  GroceryChecklistItem copyWith({String? id, String? label, bool? isChecked}) {
+    return GroceryChecklistItem(
+      id: id ?? this.id,
+      label: label ?? this.label,
+      isChecked: isChecked ?? this.isChecked,
     );
   }
 }
@@ -1317,7 +1353,7 @@ enum ProteinType {
 }
 
 class FoodDataMigrator {
-  static const int currentVersion = 10;
+  static const int currentVersion = 11;
 
   Map<String, dynamic> migrate(Map<String, dynamic> source) {
     int version = _readVersion(source);
@@ -1357,6 +1393,9 @@ class FoodDataMigrator {
         case 9:
           working = _migrateV9ToV10(working);
           version = 10;
+        case 10:
+          working = _migrateV10ToV11(working);
+          version = 11;
         default:
           throw FormatException(
             'No migration registered from version $version.',
@@ -1672,6 +1711,17 @@ class FoodDataMigrator {
     };
   }
 
+  Map<String, dynamic> _migrateV10ToV11(Map<String, dynamic> source) {
+    return <String, dynamic>{
+      ...source,
+      'schemaVersion': 11,
+      'foodItems': source['foodItems'] ?? <dynamic>[],
+      'routineItems': source['routineItems'] ?? <dynamic>[],
+      'weekPlans': source['weekPlans'] ?? <dynamic>[],
+      'groceryChecklistItems': source['groceryChecklistItems'] ?? <dynamic>[],
+    };
+  }
+
   int _parseCookedCount(dynamic rawValue) {
     final int value = rawValue is num
         ? rawValue.toInt()
@@ -1732,6 +1782,9 @@ class FoodDataStore {
       weekPlans: _decodeWeekPlans(
         migrated['weekPlans'] ?? migrated['weekPlan'],
       ),
+      groceryChecklistItems: _decodeGroceryChecklistItems(
+        migrated['groceryChecklistItems'],
+      ),
     );
 
     final CloudSnapshot? remoteSnapshot = await AppCloudSync.instance
@@ -1746,6 +1799,9 @@ class FoodDataStore {
           routineItems: _decodeRoutineItems(remoteMigrated['routineItems']),
           weekPlans: _decodeWeekPlans(
             remoteMigrated['weekPlans'] ?? remoteMigrated['weekPlan'],
+          ),
+          groceryChecklistItems: _decodeGroceryChecklistItems(
+            remoteMigrated['groceryChecklistItems'],
           ),
         );
         await save(remoteData, pushRemote: false);
@@ -1776,6 +1832,9 @@ class FoodDataStore {
           .toList(),
       'weekPlans': data.weekPlans
           .map((WeekPlan plan) => plan.toJson())
+          .toList(),
+      'groceryChecklistItems': data.groceryChecklistItems
+          .map((GroceryChecklistItem item) => item.toJson())
           .toList(),
     };
     await prefs.setString(_dataKey, jsonEncode(payload));
@@ -1855,6 +1914,20 @@ class FoodDataStore {
       ..sort((WeekPlan a, WeekPlan b) => a.weekStart.compareTo(b.weekStart));
     return sorted;
   }
+
+  List<GroceryChecklistItem> _decodeGroceryChecklistItems(dynamic rawItems) {
+    if (rawItems is! List) {
+      return <GroceryChecklistItem>[];
+    }
+    return rawItems
+        .whereType<Map>()
+        .map(
+          (Map item) =>
+              GroceryChecklistItem.fromJson(Map<String, dynamic>.from(item)),
+        )
+        .where((GroceryChecklistItem item) => item.label.isNotEmpty)
+        .toList(growable: false);
+  }
 }
 
 class MyHomePage extends StatefulWidget {
@@ -1866,16 +1939,20 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage>
-    with WidgetsBindingObserver {
+class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   final FoodDataStore _dataStore = FoodDataStore();
   final TextEditingController _dishSearchController = TextEditingController();
+  final TextEditingController _groceryChecklistController =
+      TextEditingController();
   final List<FoodItem> _foodItems = <FoodItem>[];
   final List<RoutineFoodItem> _routineItems = <RoutineFoodItem>[];
+  final List<GroceryChecklistItem> _groceryChecklistItems =
+      <GroceryChecklistItem>[];
   final Set<String> _expandedDishNames = <String>{};
   final List<WeekPlan> _weekPlans = <WeekPlan>[];
   String _selectedWeekStart = _currentWeekStartKey();
   int _lastHandledRemoteSnapshotSignal = 0;
+  int _selectedTabIndex = 0;
 
   bool _isLoading = true;
   bool _isDishSearchVisible = false;
@@ -2544,9 +2621,9 @@ class _MyHomePageState extends State<MyHomePage>
                                           const SizedBox(height: 6),
                                           SelectableText(
                                             latestInvite!.code,
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .titleMedium,
+                                            style: Theme.of(
+                                              context,
+                                            ).textTheme.titleMedium,
                                           ),
                                           if (latestInvite!.expiresAt != null)
                                             Padding(
@@ -3112,6 +3189,7 @@ class _MyHomePageState extends State<MyHomePage>
     WidgetsBinding.instance.removeObserver(this);
     AppCloudSync.instance.removeListener(_handleCloudSyncChange);
     _dishSearchController.dispose();
+    _groceryChecklistController.dispose();
     super.dispose();
   }
 
@@ -3140,6 +3218,9 @@ class _MyHomePageState extends State<MyHomePage>
         _routineItems
           ..clear()
           ..addAll(data.routineItems);
+        _groceryChecklistItems
+          ..clear()
+          ..addAll(data.groceryChecklistItems);
         _weekPlans
           ..clear()
           ..addAll(data.weekPlans);
@@ -3165,6 +3246,7 @@ class _MyHomePageState extends State<MyHomePage>
           foodItems: _foodItems,
           routineItems: _routineItems,
           weekPlans: _weekPlans,
+          groceryChecklistItems: _groceryChecklistItems,
         ),
       );
       if (!mounted) {
@@ -3173,9 +3255,9 @@ class _MyHomePageState extends State<MyHomePage>
       final AppCloudSync cloudSync = AppCloudSync.instance;
       final String? syncError = cloudSync.lastSyncError;
       if (cloudSync.hasActiveHousehold && syncError != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Saved locally. $syncError')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Saved locally. $syncError')));
       }
     } catch (_) {
       if (!mounted) {
@@ -3185,6 +3267,75 @@ class _MyHomePageState extends State<MyHomePage>
         context,
       ).showSnackBar(const SnackBar(content: Text('Could not save changes.')));
     }
+  }
+
+  Future<void> _addGroceryChecklistItem() async {
+    final String label = _groceryChecklistController.text.trim();
+    if (label.isEmpty) {
+      return;
+    }
+    setState(() {
+      _groceryChecklistItems.add(
+        GroceryChecklistItem(id: _createLocalId(), label: label),
+      );
+      _groceryChecklistController.clear();
+    });
+    await _persistData();
+  }
+
+  Future<void> _toggleGroceryChecklistItem(
+    GroceryChecklistItem item,
+    bool isChecked,
+  ) async {
+    setState(() {
+      final int index = _groceryChecklistItems.indexWhere(
+        (GroceryChecklistItem current) => current.id == item.id,
+      );
+      if (index == -1) {
+        return;
+      }
+      _groceryChecklistItems[index] = item.copyWith(isChecked: isChecked);
+    });
+    await _persistData();
+  }
+
+  Future<void> _deleteGroceryChecklistItem(GroceryChecklistItem item) async {
+    setState(() {
+      _groceryChecklistItems.removeWhere(
+        (GroceryChecklistItem current) => current.id == item.id,
+      );
+    });
+    await _persistData();
+  }
+
+  Future<void> _clearCompletedGroceryChecklistItems() async {
+    if (_groceryChecklistItems.every((GroceryChecklistItem item) {
+      return !item.isChecked;
+    })) {
+      return;
+    }
+    setState(() {
+      _groceryChecklistItems.removeWhere(
+        (GroceryChecklistItem item) => item.isChecked,
+      );
+    });
+    await _persistData();
+  }
+
+  List<GroceryChecklistItem> _sortedGroceryChecklistItems() {
+    final List<GroceryChecklistItem> items = List<GroceryChecklistItem>.from(
+      _groceryChecklistItems,
+    );
+    items.sort((GroceryChecklistItem a, GroceryChecklistItem b) {
+      final int checkedCompare = a.isChecked == b.isChecked
+          ? 0
+          : (a.isChecked ? 1 : -1);
+      if (checkedCompare != 0) {
+        return checkedCompare;
+      }
+      return a.label.toLowerCase().compareTo(b.label.toLowerCase());
+    });
+    return items;
   }
 
   void _handleCloudSyncChange() {
@@ -3214,9 +3365,7 @@ class _MyHomePageState extends State<MyHomePage>
     if (!mounted || notice == null) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(notice)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(notice)));
   }
 
   String? _validateIngredientDrafts(List<_IngredientDraft> drafts) {
@@ -4270,13 +4419,12 @@ class _MyHomePageState extends State<MyHomePage>
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    Widget body;
+  Widget _buildDishesBody() {
     if (_isLoading) {
-      body = const Center(child: CircularProgressIndicator());
-    } else if (_loadError != null) {
-      body = Center(
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_loadError != null) {
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
@@ -4295,8 +4443,9 @@ class _MyHomePageState extends State<MyHomePage>
           ],
         ),
       );
-    } else if (_foodItems.isEmpty) {
-      body = Column(
+    }
+    if (_foodItems.isEmpty) {
+      return Column(
         children: <Widget>[
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
@@ -4316,114 +4465,261 @@ class _MyHomePageState extends State<MyHomePage>
           ),
         ],
       );
-    } else {
-      final List<FoodItem> visibleFoodItems = _filteredFoodItems();
-      if (visibleFoodItems.isEmpty) {
-        final bool hasActiveConstraints =
-            _activeFilter.hasActiveFilters || _hasActiveDishSearch;
-        body = Column(
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  key: const ValueKey<String>('open_grocery_trip_button'),
-                  onPressed: _openGroceryTrip,
-                  icon: const Icon(Icons.shopping_cart_checkout),
-                  label: const Text('Grocery trip'),
-                ),
-              ),
-            ),
-            _buildWeekPlanCard(),
-            _buildDishSearchBar(),
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Text(
-                      hasActiveConstraints
-                          ? 'No dishes match the current filters or search.'
-                          : 'No dishes match.',
-                    ),
-                    const SizedBox(height: 12),
-                    OutlinedButton(
-                      onPressed: () {
-                        setState(() {
-                          _activeFilter = DishFilter.empty;
-                          _dishSearchQuery = '';
-                          _dishSearchController.clear();
-                          _isDishSearchVisible = false;
-                        });
-                      },
-                      child: Text(
-                        hasActiveConstraints
-                            ? 'Clear filters and search'
-                            : 'Clear',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        );
-      } else {
-        body = Column(
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  key: const ValueKey<String>('open_grocery_trip_button'),
-                  onPressed: _openGroceryTrip,
-                  icon: const Icon(Icons.shopping_cart_checkout),
-                  label: const Text('Grocery trip'),
-                ),
-              ),
-            ),
-            _buildWeekPlanCard(),
-            _buildDishSearchBar(),
-            if (_activeFilter.hasActiveFilters)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: <Widget>[
-                    ..._buildActiveFilterChips(),
-                    ActionChip(
-                      label: const Text('Clear'),
-                      onPressed: () {
-                        setState(() {
-                          _activeFilter = DishFilter.empty;
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            Expanded(
-              child: ListView.builder(
-                itemCount: visibleFoodItems.length,
-                itemBuilder: (BuildContext context, int index) {
-                  final FoodItem item = visibleFoodItems[index];
-                  return _buildDishCard(item, index + 1);
-                },
-              ),
-            ),
-          ],
-        );
-      }
     }
+
+    final List<FoodItem> visibleFoodItems = _filteredFoodItems();
+    if (visibleFoodItems.isEmpty) {
+      final bool hasActiveConstraints =
+          _activeFilter.hasActiveFilters || _hasActiveDishSearch;
+      return Column(
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                key: const ValueKey<String>('open_grocery_trip_button'),
+                onPressed: _openGroceryTrip,
+                icon: const Icon(Icons.shopping_cart_checkout),
+                label: const Text('Grocery trip'),
+              ),
+            ),
+          ),
+          _buildWeekPlanCard(),
+          _buildDishSearchBar(),
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    hasActiveConstraints
+                        ? 'No dishes match the current filters or search.'
+                        : 'No dishes match.',
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton(
+                    onPressed: () {
+                      setState(() {
+                        _activeFilter = DishFilter.empty;
+                        _dishSearchQuery = '';
+                        _dishSearchController.clear();
+                        _isDishSearchVisible = false;
+                      });
+                    },
+                    child: Text(
+                      hasActiveConstraints
+                          ? 'Clear filters and search'
+                          : 'Clear',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+          child: SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              key: const ValueKey<String>('open_grocery_trip_button'),
+              onPressed: _openGroceryTrip,
+              icon: const Icon(Icons.shopping_cart_checkout),
+              label: const Text('Grocery trip'),
+            ),
+          ),
+        ),
+        _buildWeekPlanCard(),
+        _buildDishSearchBar(),
+        if (_activeFilter.hasActiveFilters)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                ..._buildActiveFilterChips(),
+                ActionChip(
+                  label: const Text('Clear'),
+                  onPressed: () {
+                    setState(() {
+                      _activeFilter = DishFilter.empty;
+                    });
+                  },
+                ),
+              ],
+            ),
+          ),
+        Expanded(
+          child: ListView.builder(
+            itemCount: visibleFoodItems.length,
+            itemBuilder: (BuildContext context, int index) {
+              final FoodItem item = visibleFoodItems[index];
+              return _buildDishCard(item, index + 1);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGroceriesBody() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_loadError != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(_loadError!),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: () {
+                setState(() {
+                  _isLoading = true;
+                  _loadError = null;
+                });
+                _loadFoodItems();
+              },
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final List<GroceryChecklistItem> visibleItems =
+        _sortedGroceryChecklistItems();
+    final int activeCount = visibleItems
+        .where((GroceryChecklistItem item) => !item.isChecked)
+        .length;
+    final int completedCount = visibleItems.length - activeCount;
+
+    return Column(
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Shopping checklist',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    activeCount == 0
+                        ? 'Nothing left to buy.'
+                        : '$activeCount item${activeCount == 1 ? '' : 's'} left to buy.',
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: TextField(
+                          key: const ValueKey<String>(
+                            'grocery_checklist_field',
+                          ),
+                          controller: _groceryChecklistController,
+                          decoration: const InputDecoration(
+                            labelText: 'Add grocery item',
+                            hintText: 'e.g. Milk',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          textInputAction: TextInputAction.done,
+                          onSubmitted: (_) => _addGroceryChecklistItem(),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton(
+                        key: const ValueKey<String>(
+                          'grocery_checklist_add_button',
+                        ),
+                        onPressed: _addGroceryChecklistItem,
+                        child: const Text('Add item'),
+                      ),
+                    ],
+                  ),
+                  if (completedCount > 0) ...<Widget>[
+                    const SizedBox(height: 12),
+                    TextButton(
+                      key: const ValueKey<String>(
+                        'clear_completed_grocery_items_button',
+                      ),
+                      onPressed: _clearCompletedGroceryChecklistItems,
+                      child: Text('Clear completed ($completedCount)'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: visibleItems.isEmpty
+              ? const Center(
+                  child: Text('No grocery items yet. Add one above.'),
+                )
+              : ListView.builder(
+                  itemCount: visibleItems.length,
+                  itemBuilder: (BuildContext context, int index) {
+                    final GroceryChecklistItem item = visibleItems[index];
+                    return CheckboxListTile(
+                      key: ValueKey<String>(
+                        'grocery_checklist_item_${item.label}',
+                      ),
+                      value: item.isChecked,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      title: Text(
+                        item.label,
+                        style: TextStyle(
+                          decoration: item.isChecked
+                              ? TextDecoration.lineThrough
+                              : null,
+                        ),
+                      ),
+                      secondary: IconButton(
+                        key: ValueKey<String>(
+                          'delete_grocery_checklist_item_${item.label}',
+                        ),
+                        tooltip: 'Delete item',
+                        onPressed: () => _deleteGroceryChecklistItem(item),
+                        icon: const Icon(Icons.delete_outline),
+                      ),
+                      onChanged: (bool? value) {
+                        _toggleGroceryChecklistItem(item, value ?? false);
+                      },
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isDishesTab = _selectedTabIndex == 0;
+    final Widget body = isDishesTab
+        ? _buildDishesBody()
+        : _buildGroceriesBody();
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Text(widget.title),
+        title: Text(isDishesTab ? widget.title : 'Groceries'),
         actions: <Widget>[
           AnimatedBuilder(
             animation: AppCloudSync.instance,
@@ -4444,35 +4740,57 @@ class _MyHomePageState extends State<MyHomePage>
               );
             },
           ),
-          IconButton(
-            key: const ValueKey<String>('toggle_dish_search_button'),
-            tooltip: _isDishSearchVisible || _hasActiveDishSearch
-                ? 'Close dish search'
-                : 'Search dishes',
-            icon: Icon(
-              _isDishSearchVisible || _hasActiveDishSearch
-                  ? Icons.close
-                  : Icons.search,
+          if (isDishesTab) ...<Widget>[
+            IconButton(
+              key: const ValueKey<String>('toggle_dish_search_button'),
+              tooltip: _isDishSearchVisible || _hasActiveDishSearch
+                  ? 'Close dish search'
+                  : 'Search dishes',
+              icon: Icon(
+                _isDishSearchVisible || _hasActiveDishSearch
+                    ? Icons.close
+                    : Icons.search,
+              ),
+              onPressed: _isLoading || _loadError != null
+                  ? null
+                  : _toggleDishSearch,
             ),
-            onPressed: _isLoading || _loadError != null
-                ? null
-                : _toggleDishSearch,
-          ),
-          IconButton(
-            tooltip: 'Filter dishes',
-            icon: Icon(
-              _activeFilter.hasActiveFilters
-                  ? Icons.filter_alt
-                  : Icons.filter_alt_outlined,
+            IconButton(
+              tooltip: 'Filter dishes',
+              icon: Icon(
+                _activeFilter.hasActiveFilters
+                    ? Icons.filter_alt
+                    : Icons.filter_alt_outlined,
+              ),
+              onPressed: _isLoading || _loadError != null
+                  ? null
+                  : _openFilterMenu,
             ),
-            onPressed: _isLoading || _loadError != null
-                ? null
-                : _openFilterMenu,
-          ),
+          ],
         ],
       ),
       body: body,
-      floatingActionButton: _isLoading || _loadError != null
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedTabIndex,
+        onDestinationSelected: (int index) {
+          setState(() {
+            _selectedTabIndex = index;
+          });
+        },
+        destinations: const <NavigationDestination>[
+          NavigationDestination(
+            icon: Icon(Icons.restaurant_menu_outlined),
+            selectedIcon: Icon(Icons.restaurant_menu),
+            label: 'Dishes',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.checklist_outlined),
+            selectedIcon: Icon(Icons.checklist),
+            label: 'Groceries',
+          ),
+        ],
+      ),
+      floatingActionButton: !isDishesTab || _isLoading || _loadError != null
           ? null
           : FloatingActionButton(
               onPressed: _addFoodItem,
@@ -4504,6 +4822,8 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
   final FoodDataStore _dataStore = FoodDataStore();
   final List<FoodItem> _foodItems = <FoodItem>[];
   final List<RoutineFoodItem> _routineItems = <RoutineFoodItem>[];
+  final List<GroceryChecklistItem> _groceryChecklistItems =
+      <GroceryChecklistItem>[];
   final Map<String, GroceryTripDishSelection> _selectedDishes =
       <String, GroceryTripDishSelection>{};
   final Set<String> _selectedRoutineItemIds = <String>{};
@@ -4552,6 +4872,9 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
         _routineItems
           ..clear()
           ..addAll(routineItems);
+        _groceryChecklistItems
+          ..clear()
+          ..addAll(data.groceryChecklistItems);
         _weekPlans
           ..clear()
           ..addAll(data.weekPlans);
@@ -4582,6 +4905,7 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
           foodItems: _foodItems,
           routineItems: _routineItems,
           weekPlans: _weekPlans,
+          groceryChecklistItems: _groceryChecklistItems,
         ),
       );
       if (!mounted) {
