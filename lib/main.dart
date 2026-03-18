@@ -3824,6 +3824,16 @@ class _MyHomePageState extends State<MyHomePage> {
                           ? 'Dish missing'
                           : 'Portions: ${entry.portions}',
                     ),
+                    secondary: item == null
+                        ? null
+                        : IconButton(
+                            key: ValueKey<String>(
+                              'week_entry_edit_${entry.dishName}',
+                            ),
+                            tooltip: 'Edit dish',
+                            onPressed: () => _editDish(item),
+                            icon: const Icon(Icons.edit_outlined),
+                          ),
                     onChanged: item == null
                         ? null
                         : (bool? value) {

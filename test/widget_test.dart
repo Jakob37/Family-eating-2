@@ -278,6 +278,95 @@ void main() {
     ]);
   });
 
+  testWidgets('Can edit a dish directly from the week plan', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'family_eating.food_data': jsonEncode(<String, dynamic>{
+        'schemaVersion': 10,
+        'foodItems': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'name': 'Soup',
+            'proteins': <String>['fish'],
+            'defaultPortions': 2,
+            'ingredients': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'name': 'Water',
+                'amount': null,
+                'unitKey': null,
+              },
+            ],
+            'cookingLogs': <Map<String, dynamic>>[],
+          },
+        ],
+        'routineItems': <Map<String, dynamic>>[],
+        'weekPlans': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'weekStart': _weekStartKey(DateTime.now()),
+            'entries': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'dishName': 'Soup',
+                'portions': 2,
+                'isCooked': false,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('week_entry_Soup')),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('week_entry_edit_Soup')),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('dish_name_field')),
+      'Tomato Soup',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('ingredient_name_0')),
+      'Tomato',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('week_entry_Tomato Soup')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey<String>('week_entry_Soup')), findsNothing);
+
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String stored = prefs.getString('family_eating.food_data')!;
+    final Map<String, dynamic> payload = Map<String, dynamic>.from(
+      jsonDecode(stored) as Map,
+    );
+    final List<dynamic> items = payload['foodItems'] as List<dynamic>;
+    final Map<String, dynamic> firstItem = Map<String, dynamic>.from(
+      items.first as Map,
+    );
+    expect(firstItem['name'], 'Tomato Soup');
+
+    final List<dynamic> weekPlans = payload['weekPlans'] as List<dynamic>;
+    final Map<String, dynamic> weekPlan = Map<String, dynamic>.from(
+      weekPlans.first as Map,
+    );
+    final List<dynamic> entries = weekPlan['entries'] as List<dynamic>;
+    final Map<String, dynamic> firstEntry = Map<String, dynamic>.from(
+      entries.first as Map,
+    );
+    expect(firstEntry['dishName'], 'Tomato Soup');
+  });
+
   testWidgets('Grocery trip builds copyable ingredient list from selections', (
     WidgetTester tester,
   ) async {
