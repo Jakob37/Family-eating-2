@@ -204,7 +204,17 @@ with check (
 );
 ```
 
-## 6. Build the app with Supabase enabled
+## 6. Enable Realtime for household snapshots
+
+Run:
+
+```sql
+alter publication supabase_realtime add table public.household_snapshots;
+```
+
+This lets devices auto-refresh when another household member saves changes.
+
+## 7. Build the app with Supabase enabled
 
 Use `--dart-define` values when running or building:
 
@@ -217,7 +227,7 @@ flutter run \
 
 Without these defines, the app stays in local-only mode.
 
-## 7. Use the in-app flow
+## 8. Use the in-app flow
 
 1. Open the cloud icon in the app bar.
 2. Enter email and request a sign-in link.
@@ -227,7 +237,7 @@ Without these defines, the app stays in local-only mode.
 6. On the second device, sign in and use `Join household` with that code.
 7. Once a household is active, local saves will also push a shared household snapshot.
 
-## 8. What is implemented right now
+## 9. What is implemented right now
 
 Current code supports:
 - Optional Supabase initialization
@@ -235,9 +245,10 @@ Current code supports:
 - Create household
 - Create invite codes in the app
 - Join household by invite code
+- Auto-refresh after household snapshot changes
 - Pull latest household snapshot on app load
-- Push the full app snapshot after local saves
+- Push the full app snapshot after local saves with version checks
 
 Current limitations:
-- Snapshot sync uses a simple whole-document overwrite strategy
-- No conflict-resolution UI beyond local-first reloads
+- Sync is still whole-document and does not merge concurrent edits
+- No conflict-resolution UI beyond automatic reload and retry

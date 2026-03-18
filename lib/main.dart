@@ -1866,7 +1866,8 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _MyHomePageState extends State<MyHomePage>
+    with WidgetsBindingObserver {
   final FoodDataStore _dataStore = FoodDataStore();
   final TextEditingController _dishSearchController = TextEditingController();
   final List<FoodItem> _foodItems = <FoodItem>[];
@@ -1874,6 +1875,7 @@ class _MyHomePageState extends State<MyHomePage> {
   final Set<String> _expandedDishNames = <String>{};
   final List<WeekPlan> _weekPlans = <WeekPlan>[];
   String _selectedWeekStart = _currentWeekStartKey();
+  int _lastHandledRemoteSnapshotSignal = 0;
 
   bool _isLoading = true;
   bool _isDishSearchVisible = false;
@@ -3098,13 +3100,31 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _lastHandledRemoteSnapshotSignal =
+        AppCloudSync.instance.remoteSnapshotSignal;
+    AppCloudSync.instance.addListener(_handleCloudSyncChange);
     _loadFoodItems();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    AppCloudSync.instance.removeListener(_handleCloudSyncChange);
     _dishSearchController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      return;
+    }
+    final AppCloudSync cloudSync = AppCloudSync.instance;
+    if (!cloudSync.hasActiveHousehold || _isLoading) {
+      return;
+    }
+    _reloadFromCloud();
   }
 
   Future<void> _loadFoodItems() async {
@@ -3147,6 +3167,16 @@ class _MyHomePageState extends State<MyHomePage> {
           weekPlans: _weekPlans,
         ),
       );
+      if (!mounted) {
+        return;
+      }
+      final AppCloudSync cloudSync = AppCloudSync.instance;
+      final String? syncError = cloudSync.lastSyncError;
+      if (cloudSync.hasActiveHousehold && syncError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved locally. $syncError')),
+        );
+      }
     } catch (_) {
       if (!mounted) {
         return;
@@ -3155,6 +3185,38 @@ class _MyHomePageState extends State<MyHomePage> {
         context,
       ).showSnackBar(const SnackBar(content: Text('Could not save changes.')));
     }
+  }
+
+  void _handleCloudSyncChange() {
+    final AppCloudSync cloudSync = AppCloudSync.instance;
+    final int remoteSignal = cloudSync.remoteSnapshotSignal;
+    if (remoteSignal == _lastHandledRemoteSnapshotSignal) {
+      return;
+    }
+    _lastHandledRemoteSnapshotSignal = remoteSignal;
+    if (!mounted || _isLoading) {
+      return;
+    }
+    _reloadFromCloud(
+      notice: 'Household updated on another device. Latest data loaded.',
+    );
+  }
+
+  Future<void> _reloadFromCloud({String? notice}) async {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
+    await _loadFoodItems();
+    if (!mounted || notice == null) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(notice)));
   }
 
   String? _validateIngredientDrafts(List<_IngredientDraft> drafts) {
@@ -4522,6 +4584,16 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
           weekPlans: _weekPlans,
         ),
       );
+      if (!mounted) {
+        return;
+      }
+      final AppCloudSync cloudSync = AppCloudSync.instance;
+      final String? syncError = cloudSync.lastSyncError;
+      if (cloudSync.hasActiveHousehold && syncError != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Saved locally. $syncError')));
+      }
     } catch (_) {
       if (!mounted) {
         return;

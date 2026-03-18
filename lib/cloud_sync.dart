@@ -66,6 +66,7 @@ class AppCloudSync extends ChangeNotifier {
   static final AppCloudSync instance = AppCloudSync._();
 
   StreamSubscription<AuthState>? _authSubscription;
+  RealtimeChannel? _snapshotChannel;
   SupabaseClient? _client;
   String? _initError;
   bool _isInitialized = false;
@@ -74,6 +75,8 @@ class AppCloudSync extends ChangeNotifier {
   DateTime? _lastSyncedAt;
   String? _activeHouseholdId;
   String? _activeHouseholdName;
+  int? _activeSnapshotVersion;
+  int _remoteSnapshotSignal = 0;
 
   bool get isConfigured => SupabaseSetupConfig.isConfigured;
   bool get isAvailable => _client != null;
@@ -86,6 +89,7 @@ class AppCloudSync extends ChangeNotifier {
   DateTime? get lastSyncedAt => _lastSyncedAt;
   String? get activeHouseholdId => _activeHouseholdId;
   String? get activeHouseholdName => _activeHouseholdName;
+  int get remoteSnapshotSignal => _remoteSnapshotSignal;
 
   User? get currentUser => _client?.auth.currentUser;
   String? get currentUserEmail => currentUser?.email;
@@ -213,6 +217,7 @@ class AppCloudSync extends ChangeNotifier {
         householdId: householdId,
         householdName: (household['name'] ?? normalizedName).toString(),
       );
+      _activeSnapshotVersion = 1;
       return null;
     } catch (error) {
       return '$error';
@@ -277,6 +282,7 @@ class AppCloudSync extends ChangeNotifier {
         householdId: householdId,
         householdName: (household['name'] ?? 'Household').toString(),
       );
+      _activeSnapshotVersion = null;
       return null;
     } catch (error) {
       return '$error';
@@ -359,6 +365,7 @@ class AppCloudSync extends ChangeNotifier {
         householdId: (household['id'] ?? '').toString(),
         householdName: (household['name'] ?? 'Household').toString(),
       );
+      await _subscribeToSnapshotChanges();
       return null;
     } catch (error) {
       return '$error';
@@ -395,6 +402,9 @@ class AppCloudSync extends ChangeNotifier {
         return null;
       }
 
+      final int version = row['version'] is num ? (row['version'] as num).toInt() : 0;
+      _activeSnapshotVersion = version;
+
       final dynamic rawJson = row['data_json'];
       final Map<String, dynamic> data = rawJson is Map
           ? Map<String, dynamic>.from(rawJson)
@@ -402,7 +412,7 @@ class AppCloudSync extends ChangeNotifier {
       return CloudSnapshot(
         householdId: householdId,
         data: data,
-        version: row['version'] is num ? (row['version'] as num).toInt() : 0,
+        version: version,
         updatedAt: DateTime.tryParse('${row['updated_at'] ?? ''}'),
         updatedBy: row['updated_by']?.toString(),
       );
@@ -427,21 +437,41 @@ class AppCloudSync extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final Map<String, dynamic>? current = await client
+      final int expectedVersion;
+      if (_activeSnapshotVersion != null) {
+        expectedVersion = _activeSnapshotVersion!;
+      } else {
+        final Map<String, dynamic>? current = await client
+            .from('household_snapshots')
+            .select('version')
+            .eq('household_id', householdId)
+            .maybeSingle();
+        expectedVersion = current?['version'] is num
+            ? (current!['version'] as num).toInt()
+            : 0;
+      }
+      final int nextVersion = expectedVersion + 1;
+      final Map<String, dynamic>? updated = await client
           .from('household_snapshots')
-          .select('version')
+          .update(<String, dynamic>{
+            'data_json': data,
+            'version': nextVersion,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+            'updated_by': user.id,
+          })
           .eq('household_id', householdId)
+          .eq('version', expectedVersion)
+          .select('version, updated_by')
           .maybeSingle();
-      final int nextVersion = current?['version'] is num
-          ? (current!['version'] as num).toInt() + 1
-          : 1;
-      await client.from('household_snapshots').upsert(<String, dynamic>{
-        'household_id': householdId,
-        'data_json': data,
-        'version': nextVersion,
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
-        'updated_by': user.id,
-      });
+      if (updated == null) {
+        _isSyncing = false;
+        _lastSyncError =
+            'Cloud data changed on another device. Latest household data will be reloaded.';
+        _remoteSnapshotSignal++;
+        notifyListeners();
+        return _lastSyncError;
+      }
+      _activeSnapshotVersion = nextVersion;
       _isSyncing = false;
       _lastSyncedAt = DateTime.now().toUtc();
       notifyListeners();
@@ -458,21 +488,80 @@ class AppCloudSync extends ChangeNotifier {
     required String householdId,
     required String householdName,
   }) async {
+    final bool householdChanged = householdId != _activeHouseholdId;
     _activeHouseholdId = householdId;
     _activeHouseholdName = householdName;
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setString(_activeHouseholdIdKey, householdId);
     await prefs.setString(_activeHouseholdNameKey, householdName);
+    if (householdChanged) {
+      _activeSnapshotVersion = null;
+      await _subscribeToSnapshotChanges();
+    }
     notifyListeners();
   }
 
   Future<void> _clearActiveHousehold() async {
+    await _unsubscribeFromSnapshotChanges();
     _activeHouseholdId = null;
     _activeHouseholdName = null;
+    _activeSnapshotVersion = null;
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.remove(_activeHouseholdIdKey);
     await prefs.remove(_activeHouseholdNameKey);
     notifyListeners();
+  }
+
+  Future<void> _subscribeToSnapshotChanges() async {
+    final SupabaseClient? client = _client;
+    final String? householdId = _activeHouseholdId;
+    if (client == null || householdId == null) {
+      return;
+    }
+
+    await _unsubscribeFromSnapshotChanges();
+
+    _snapshotChannel = client
+        .channel('household_snapshots:$householdId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'household_snapshots',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'household_id',
+            value: householdId,
+          ),
+          callback: (PostgresChangePayload payload) {
+            final Map<String, dynamic> newRecord = payload.newRecord;
+            final int remoteVersion = newRecord['version'] is num
+                ? (newRecord['version'] as num).toInt()
+                : 0;
+            final String? updatedBy = newRecord['updated_by']?.toString();
+            final String? currentUserId = currentUser?.id;
+            if (currentUserId != null &&
+                updatedBy == currentUserId &&
+                _activeSnapshotVersion == remoteVersion) {
+              return;
+            }
+            if (_activeSnapshotVersion != null &&
+                remoteVersion <= _activeSnapshotVersion!) {
+              return;
+            }
+            _remoteSnapshotSignal++;
+            notifyListeners();
+          },
+        )
+        .subscribe();
+  }
+
+  Future<void> _unsubscribeFromSnapshotChanges() async {
+    if (_snapshotChannel == null || _client == null) {
+      _snapshotChannel = null;
+      return;
+    }
+    await _client!.removeChannel(_snapshotChannel!);
+    _snapshotChannel = null;
   }
 
   String _generateInviteCode() {
