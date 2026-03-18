@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -26,6 +27,16 @@ class HouseholdSummary {
   final String name;
 }
 
+class HouseholdInvite {
+  const HouseholdInvite({
+    required this.code,
+    this.expiresAt,
+  });
+
+  final String code;
+  final DateTime? expiresAt;
+}
+
 class CloudSnapshot {
   const CloudSnapshot({
     required this.householdId,
@@ -44,6 +55,8 @@ class CloudSnapshot {
 
 class AppCloudSync extends ChangeNotifier {
   AppCloudSync._();
+
+  static const String _inviteAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
   static const String _activeHouseholdIdKey =
       'family_eating.cloud.active_household_id';
@@ -240,6 +253,14 @@ class AppCloudSync extends ChangeNotifier {
         return 'Invite code is missing a household id.';
       }
 
+      await client
+          .from('household_invites')
+          .update(<String, dynamic>{
+            'used_by': user.id,
+            'used_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('code', normalizedCode);
+
       await client.from('household_members').upsert(<String, dynamic>{
         'household_id': householdId,
         'user_id': user.id,
@@ -259,6 +280,62 @@ class AppCloudSync extends ChangeNotifier {
       return null;
     } catch (error) {
       return '$error';
+    }
+  }
+
+  Future<HouseholdInvite?> createInvite({
+    Duration validFor = const Duration(days: 7),
+  }) async {
+    final SupabaseClient? client = _client;
+    final User? user = currentUser;
+    final String? householdId = _activeHouseholdId;
+    if (client == null || user == null) {
+      _lastSyncError = 'Sign in first.';
+      notifyListeners();
+      return null;
+    }
+    if (householdId == null) {
+      _lastSyncError = 'Create or join a household first.';
+      notifyListeners();
+      return null;
+    }
+
+    _isSyncing = true;
+    _lastSyncError = null;
+    notifyListeners();
+
+    final DateTime expiresAt = DateTime.now().toUtc().add(validFor);
+
+    try {
+      for (int attempt = 0; attempt < 5; attempt++) {
+        final String code = _generateInviteCode();
+        try {
+          await client.from('household_invites').insert(<String, dynamic>{
+            'household_id': householdId,
+            'code': code,
+            'created_by': user.id,
+            'expires_at': expiresAt.toIso8601String(),
+          });
+          _isSyncing = false;
+          _lastSyncedAt = DateTime.now().toUtc();
+          notifyListeners();
+          return HouseholdInvite(code: code, expiresAt: expiresAt);
+        } on PostgrestException catch (error) {
+          if (error.code == '23505') {
+            continue;
+          }
+          rethrow;
+        }
+      }
+      _isSyncing = false;
+      _lastSyncError = 'Could not generate a unique invite code.';
+      notifyListeners();
+      return null;
+    } catch (error) {
+      _isSyncing = false;
+      _lastSyncError = '$error';
+      notifyListeners();
+      return null;
     }
   }
 
@@ -396,5 +473,17 @@ class AppCloudSync extends ChangeNotifier {
     await prefs.remove(_activeHouseholdIdKey);
     await prefs.remove(_activeHouseholdNameKey);
     notifyListeners();
+  }
+
+  String _generateInviteCode() {
+    final Random random = Random.secure();
+    final StringBuffer buffer = StringBuffer();
+    for (int index = 0; index < 8; index++) {
+      buffer.write(_inviteAlphabet[random.nextInt(_inviteAlphabet.length)]);
+      if (index == 3) {
+        buffer.write('-');
+      }
+    }
+    return buffer.toString();
   }
 }

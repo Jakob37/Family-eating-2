@@ -222,8 +222,10 @@ Without these defines, the app stays in local-only mode.
 1. Open the cloud icon in the app bar.
 2. Enter email and request a sign-in link.
 3. Open the email link on the same device.
-4. Create a household or join one using an invite code.
-5. Once a household is active, local saves will also push a shared household snapshot.
+4. Create a household.
+5. Use `Create invite code` and share the code with the other person.
+6. On the second device, sign in and use `Join household` with that code.
+7. Once a household is active, local saves will also push a shared household snapshot.
 
 ## 8. What is implemented right now
 
@@ -231,11 +233,11 @@ Current code supports:
 - Optional Supabase initialization
 - Email OTP sign-in
 - Create household
+- Create invite codes in the app
 - Join household by invite code
 - Pull latest household snapshot on app load
 - Push the full app snapshot after local saves
 
 Current limitations:
-- No in-app invite code generator yet
 - Snapshot sync uses a simple whole-document overwrite strategy
 - No conflict-resolution UI beyond local-first reloads

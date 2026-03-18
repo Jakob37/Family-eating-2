@@ -2361,13 +2361,17 @@ class _MyHomePageState extends State<MyHomePage> {
         TextEditingController();
     final TextEditingController inviteCodeController = TextEditingController();
     String? actionMessage;
+    HouseholdInvite? latestInvite;
 
     await showDialog<void>(
       context: context,
       builder: (BuildContext context) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setDialogState) {
-            Future<void> runAction(Future<String?> Function() action) async {
+            Future<void> runAction(
+              Future<String?> Function() action, {
+              String? successMessage,
+            }) async {
               setDialogState(() {
                 actionMessage = null;
               });
@@ -2378,6 +2382,7 @@ class _MyHomePageState extends State<MyHomePage> {
               setDialogState(() {
                 actionMessage =
                     result ??
+                    successMessage ??
                     'Done. If you used email sign-in, open the link from your inbox on this device.';
               });
               setState(() {
@@ -2385,6 +2390,22 @@ class _MyHomePageState extends State<MyHomePage> {
                 _loadError = null;
               });
               _loadFoodItems();
+            }
+
+            Future<void> createInviteCode() async {
+              setDialogState(() {
+                actionMessage = null;
+              });
+              final HouseholdInvite? invite = await cloudSync.createInvite();
+              if (!context.mounted) {
+                return;
+              }
+              setDialogState(() {
+                latestInvite = invite;
+                actionMessage = invite == null
+                    ? cloudSync.lastSyncError ?? 'Could not create invite code.'
+                    : 'Invite code ready to share.';
+              });
             }
 
             return AnimatedBuilder(
@@ -2436,6 +2457,8 @@ class _MyHomePageState extends State<MyHomePage> {
                                         () => cloudSync.signInWithEmailOtp(
                                           emailController.text,
                                         ),
+                                        successMessage:
+                                            'Sign-in link sent. Open it from your inbox on this device.',
                                       );
                                     },
                               child: const Text('Send sign-in link'),
@@ -2458,6 +2481,8 @@ class _MyHomePageState extends State<MyHomePage> {
                                           () => cloudSync.createHousehold(
                                             householdNameController.text,
                                           ),
+                                          successMessage:
+                                              'Household created and connected.',
                                         );
                                       },
                                 child: const Text('Create household'),
@@ -2478,11 +2503,90 @@ class _MyHomePageState extends State<MyHomePage> {
                                           () => cloudSync.joinHousehold(
                                             inviteCodeController.text,
                                           ),
+                                          successMessage:
+                                              'Joined household successfully.',
                                         );
                                       },
                                 child: const Text('Join household'),
                               ),
                               if (cloudSync.hasActiveHousehold) ...<Widget>[
+                                const SizedBox(height: 16),
+                                FilledButton.tonalIcon(
+                                  onPressed: cloudSync.isSyncing
+                                      ? null
+                                      : createInviteCode,
+                                  icon: const Icon(Icons.person_add_alt_1),
+                                  label: const Text('Create invite code'),
+                                ),
+                                if (latestInvite != null) ...<Widget>[
+                                  const SizedBox(height: 8),
+                                  DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.surfaceContainerHighest,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(12),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: <Widget>[
+                                          Text(
+                                            'Invite code',
+                                            style: Theme.of(
+                                              context,
+                                            ).textTheme.labelLarge,
+                                          ),
+                                          const SizedBox(height: 6),
+                                          SelectableText(
+                                            latestInvite!.code,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .titleMedium,
+                                          ),
+                                          if (latestInvite!.expiresAt != null)
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                top: 6,
+                                              ),
+                                              child: Text(
+                                                'Expires ${latestInvite!.expiresAt!.toLocal()}',
+                                                style: Theme.of(
+                                                  context,
+                                                ).textTheme.bodySmall,
+                                              ),
+                                            ),
+                                          const SizedBox(height: 8),
+                                          FilledButton.tonalIcon(
+                                            onPressed: () async {
+                                              await Clipboard.setData(
+                                                ClipboardData(
+                                                  text: latestInvite!.code,
+                                                ),
+                                              );
+                                              if (!context.mounted) {
+                                                return;
+                                              }
+                                              ScaffoldMessenger.of(
+                                                context,
+                                              ).showSnackBar(
+                                                const SnackBar(
+                                                  content: Text(
+                                                    'Invite code copied.',
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                            icon: const Icon(Icons.copy),
+                                            label: const Text('Copy code'),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
                                 const SizedBox(height: 16),
                                 FilledButton.tonalIcon(
                                   onPressed: cloudSync.isSyncing
@@ -2506,7 +2610,10 @@ class _MyHomePageState extends State<MyHomePage> {
                                 onPressed: cloudSync.isSyncing
                                     ? null
                                     : () {
-                                        runAction(cloudSync.signOut);
+                                        runAction(
+                                          cloudSync.signOut,
+                                          successMessage: 'Signed out.',
+                                        );
                                       },
                                 child: const Text('Sign out'),
                               ),
