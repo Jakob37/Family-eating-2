@@ -197,6 +197,69 @@ void main() {
     expect(find.text('Tofu Bowl'), findsNothing);
   });
 
+  testWidgets('Dish search is toggleable and filters the list', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'family_eating.food_data': jsonEncode(<String, dynamic>{
+        'schemaVersion': 10,
+        'foodItems': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'name': 'Tomato Soup',
+            'proteins': <String>['fish'],
+            'ingredients': <String>['Tomato'],
+            'cookingLogs': <Map<String, dynamic>>[],
+          },
+          <String, dynamic>{
+            'name': 'Chicken Pasta',
+            'proteins': <String>['chicken'],
+            'ingredients': <String>['Chicken'],
+            'cookingLogs': <Map<String, dynamic>>[],
+          },
+        ],
+      }),
+    });
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('dish_search_field')),
+      findsNothing,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('toggle_dish_search_button')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('dish_search_field')),
+      findsOneWidget,
+    );
+
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('dish_search_field')),
+      'soup',
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tomato Soup'), findsOneWidget);
+    expect(find.text('Chicken Pasta'), findsNothing);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('toggle_dish_search_button')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('dish_search_field')),
+      findsNothing,
+    );
+    expect(find.text('Tomato Soup'), findsOneWidget);
+    expect(find.text('Chicken Pasta'), findsOneWidget);
+  });
+
   testWidgets('Can edit a dish and manage ingredients list', (
     WidgetTester tester,
   ) async {

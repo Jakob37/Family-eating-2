@@ -1827,6 +1827,7 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   final FoodDataStore _dataStore = FoodDataStore();
+  final TextEditingController _dishSearchController = TextEditingController();
   final List<FoodItem> _foodItems = <FoodItem>[];
   final List<RoutineFoodItem> _routineItems = <RoutineFoodItem>[];
   final Set<String> _expandedDishNames = <String>{};
@@ -1834,7 +1835,9 @@ class _MyHomePageState extends State<MyHomePage> {
   String _selectedWeekStart = _currentWeekStartKey();
 
   bool _isLoading = true;
+  bool _isDishSearchVisible = false;
   String? _loadError;
+  String _dishSearchQuery = '';
   DishFilter _activeFilter = DishFilter.empty;
 
   int _compareByRanking(FoodItem a, FoodItem b) {
@@ -1898,7 +1901,24 @@ class _MyHomePageState extends State<MyHomePage> {
   List<FoodItem> _filteredFoodItems() {
     return _foodItems
         .where((FoodItem item) => _matchesFilter(item, _activeFilter))
+        .where(_matchesDishSearch)
         .toList(growable: false);
+  }
+
+  bool get _hasActiveDishSearch => _dishSearchQuery.trim().isNotEmpty;
+
+  bool _matchesDishSearch(FoodItem item) {
+    final String query = _dishSearchQuery.trim().toLowerCase();
+    if (query.isEmpty) {
+      return true;
+    }
+    if (item.name.toLowerCase().contains(query)) {
+      return true;
+    }
+    return item.ingredients.any(
+      (IngredientEntry entry) =>
+          entry.displayLabel.toLowerCase().contains(query),
+    );
   }
 
   bool _matchesFilter(FoodItem item, DishFilter filter) {
@@ -2169,6 +2189,62 @@ class _MyHomePageState extends State<MyHomePage> {
       );
     }
     return chips;
+  }
+
+  void _toggleDishSearch() {
+    setState(() {
+      if (_isDishSearchVisible || _hasActiveDishSearch) {
+        _isDishSearchVisible = false;
+        _dishSearchQuery = '';
+        _dishSearchController.clear();
+      } else {
+        _isDishSearchVisible = true;
+      }
+    });
+  }
+
+  void _clearDishSearch() {
+    setState(() {
+      _dishSearchQuery = '';
+      _dishSearchController.clear();
+    });
+  }
+
+  Widget _buildDishSearchBar() {
+    final bool showSearch = _isDishSearchVisible || _hasActiveDishSearch;
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      child: !showSearch
+          ? const SizedBox.shrink()
+          : Padding(
+              key: const ValueKey<String>('dish_search_container'),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: TextField(
+                key: const ValueKey<String>('dish_search_field'),
+                controller: _dishSearchController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: 'Search dishes',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _hasActiveDishSearch
+                      ? IconButton(
+                          tooltip: 'Clear search',
+                          onPressed: _clearDishSearch,
+                          icon: const Icon(Icons.close),
+                        )
+                      : null,
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+                textInputAction: TextInputAction.search,
+                onChanged: (String value) {
+                  setState(() {
+                    _dishSearchQuery = value;
+                  });
+                },
+              ),
+            ),
+    );
   }
 
   String _cloudStatusSummary(AppCloudSync cloudSync) {
@@ -2824,6 +2900,12 @@ class _MyHomePageState extends State<MyHomePage> {
   void initState() {
     super.initState();
     _loadFoodItems();
+  }
+
+  @override
+  void dispose() {
+    _dishSearchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadFoodItems() async {
@@ -3938,6 +4020,8 @@ class _MyHomePageState extends State<MyHomePage> {
     } else {
       final List<FoodItem> visibleFoodItems = _filteredFoodItems();
       if (visibleFoodItems.isEmpty) {
+        final bool hasActiveConstraints =
+            _activeFilter.hasActiveFilters || _hasActiveDishSearch;
         body = Column(
           children: <Widget>[
             Padding(
@@ -3953,20 +4037,32 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             _buildWeekPlanCard(),
+            _buildDishSearchBar(),
             Expanded(
               child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    const Text('No dishes match current filters.'),
+                    Text(
+                      hasActiveConstraints
+                          ? 'No dishes match the current filters or search.'
+                          : 'No dishes match.',
+                    ),
                     const SizedBox(height: 12),
                     OutlinedButton(
                       onPressed: () {
                         setState(() {
                           _activeFilter = DishFilter.empty;
+                          _dishSearchQuery = '';
+                          _dishSearchController.clear();
+                          _isDishSearchVisible = false;
                         });
                       },
-                      child: const Text('Clear filters'),
+                      child: Text(
+                        hasActiveConstraints
+                            ? 'Clear filters and search'
+                            : 'Clear',
+                      ),
                     ),
                   ],
                 ),
@@ -3990,6 +4086,7 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             _buildWeekPlanCard(),
+            _buildDishSearchBar(),
             if (_activeFilter.hasActiveFilters)
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -4047,6 +4144,20 @@ class _MyHomePageState extends State<MyHomePage> {
                 onPressed: _showAccountAndSyncDialog,
               );
             },
+          ),
+          IconButton(
+            key: const ValueKey<String>('toggle_dish_search_button'),
+            tooltip: _isDishSearchVisible || _hasActiveDishSearch
+                ? 'Close dish search'
+                : 'Search dishes',
+            icon: Icon(
+              _isDishSearchVisible || _hasActiveDishSearch
+                  ? Icons.close
+                  : Icons.search,
+            ),
+            onPressed: _isLoading || _loadError != null
+                ? null
+                : _toggleDishSearch,
           ),
           IconButton(
             tooltip: 'Filter dishes',
