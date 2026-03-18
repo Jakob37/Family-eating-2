@@ -70,6 +70,7 @@ class FamilyEatingData {
 class FoodItem {
   const FoodItem({
     required this.name,
+    this.category = FoodCategory.main,
     required this.proteins,
     this.ingredients = const <IngredientEntry>[],
     this.cookingLogs = const <CookingLog>[],
@@ -78,6 +79,7 @@ class FoodItem {
   });
 
   final String name;
+  final FoodCategory category;
   final List<ProteinType> proteins;
   final List<IngredientEntry> ingredients;
   final List<CookingLog> cookingLogs;
@@ -86,6 +88,9 @@ class FoodItem {
 
   factory FoodItem.fromJson(Map<String, dynamic> json) {
     final String name = (json['name'] ?? '').toString().trim();
+    final FoodCategory category = FoodCategory.fromStorageValue(
+      json['category']?.toString() ?? '',
+    );
     final dynamic rawProteins = json['proteins'];
     final List<ProteinType> proteins = rawProteins is List
         ? rawProteins
@@ -116,6 +121,7 @@ class FoodItem {
 
     return FoodItem(
       name: name,
+      category: category,
       proteins: proteins,
       ingredients: ingredients,
       cookingLogs: cookingLogs,
@@ -127,6 +133,7 @@ class FoodItem {
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
       'name': name,
+      'category': category.storageValue,
       'proteins': proteins
           .map((ProteinType protein) => protein.storageValue)
           .toList(growable: false),
@@ -173,6 +180,7 @@ class FoodItem {
 
   FoodItem copyWith({
     String? name,
+    FoodCategory? category,
     List<ProteinType>? proteins,
     List<IngredientEntry>? ingredients,
     List<CookingLog>? cookingLogs,
@@ -181,6 +189,7 @@ class FoodItem {
   }) {
     return FoodItem(
       name: name ?? this.name,
+      category: category ?? this.category,
       proteins: proteins ?? this.proteins,
       ingredients: ingredients ?? this.ingredients,
       cookingLogs: cookingLogs ?? this.cookingLogs,
@@ -278,6 +287,7 @@ class CookingLog {
 class DishEditorResult {
   const DishEditorResult({
     required this.name,
+    required this.category,
     required this.proteins,
     required this.ingredients,
     required this.defaultPortions,
@@ -285,6 +295,7 @@ class DishEditorResult {
   });
 
   final String name;
+  final FoodCategory category;
   final List<ProteinType> proteins;
   final List<IngredientEntry> ingredients;
   final int defaultPortions;
@@ -1210,6 +1221,7 @@ String _weekLabel(String weekStart) {
 
 class DishFilter {
   const DishFilter({
+    this.selectedCategories = const <FoodCategory>{},
     this.selectedProteins = const <ProteinType>{},
     this.minRating = 0,
     this.minCookingTimeMinutes,
@@ -1218,25 +1230,29 @@ class DishFilter {
 
   static const DishFilter empty = DishFilter();
 
+  final Set<FoodCategory> selectedCategories;
   final Set<ProteinType> selectedProteins;
   final double minRating;
   final int? minCookingTimeMinutes;
   final int? maxCookingTimeMinutes;
 
   bool get hasActiveFilters {
-    return selectedProteins.isNotEmpty ||
+    return selectedCategories.isNotEmpty ||
+        selectedProteins.isNotEmpty ||
         minRating > 0 ||
         minCookingTimeMinutes != null ||
         maxCookingTimeMinutes != null;
   }
 
   DishFilter copyWith({
+    Set<FoodCategory>? selectedCategories,
     Set<ProteinType>? selectedProteins,
     double? minRating,
     int? minCookingTimeMinutes,
     int? maxCookingTimeMinutes,
   }) {
     return DishFilter(
+      selectedCategories: selectedCategories ?? this.selectedCategories,
       selectedProteins: selectedProteins ?? this.selectedProteins,
       minRating: minRating ?? this.minRating,
       minCookingTimeMinutes:
@@ -1244,6 +1260,31 @@ class DishFilter {
       maxCookingTimeMinutes:
           maxCookingTimeMinutes ?? this.maxCookingTimeMinutes,
     );
+  }
+}
+
+enum FoodCategory {
+  main('main', 'Main', Icons.dinner_dining),
+  side('side', 'Side', Icons.rice_bowl),
+  dessert('dessert', 'Dessert', Icons.cake_outlined),
+  breakfast('breakfast', 'Breakfast', Icons.free_breakfast_outlined),
+  snack('snack', 'Snack', Icons.cookie_outlined);
+
+  const FoodCategory(this.storageValue, this.label, this.icon);
+
+  final String storageValue;
+  final String label;
+  final IconData icon;
+
+  static FoodCategory fromStorageValue(String value) {
+    final String normalized = value.trim().toLowerCase();
+    for (final FoodCategory category in FoodCategory.values) {
+      if (category.storageValue == normalized ||
+          category.label.toLowerCase() == normalized) {
+        return category;
+      }
+    }
+    return FoodCategory.main;
   }
 }
 
@@ -1922,6 +1963,11 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   bool _matchesFilter(FoodItem item, DishFilter filter) {
+    if (filter.selectedCategories.isNotEmpty &&
+        !filter.selectedCategories.contains(item.category)) {
+      return false;
+    }
+
     if (filter.selectedProteins.isNotEmpty) {
       final bool hasProteinMatch = item.proteins.any(
         filter.selectedProteins.contains,
@@ -1961,6 +2007,9 @@ class _MyHomePageState extends State<MyHomePage> {
     required DishFilter initialFilter,
     String title = 'Filter dishes',
   }) async {
+    Set<FoodCategory> selectedCategories = Set<FoodCategory>.from(
+      initialFilter.selectedCategories,
+    );
     Set<ProteinType> selectedProteins = Set<ProteinType>.from(
       initialFilter.selectedProteins,
     );
@@ -1984,6 +2033,34 @@ class _MyHomePageState extends State<MyHomePage> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
+                      const Text('Categories'),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: FoodCategory.values
+                            .map((FoodCategory category) {
+                              return FilterChip(
+                                key: ValueKey<String>(
+                                  'dish_filter_category_${category.storageValue}',
+                                ),
+                                selected: selectedCategories.contains(category),
+                                avatar: Icon(category.icon, size: 16),
+                                label: Text(category.label),
+                                onSelected: (bool isSelected) {
+                                  setDialogState(() {
+                                    if (isSelected) {
+                                      selectedCategories.add(category);
+                                    } else {
+                                      selectedCategories.remove(category);
+                                    }
+                                  });
+                                },
+                              );
+                            })
+                            .toList(growable: false),
+                      ),
+                      const SizedBox(height: 16),
                       const Text('Only include proteins'),
                       const SizedBox(height: 8),
                       Wrap(
@@ -2105,6 +2182,9 @@ class _MyHomePageState extends State<MyHomePage> {
 
                     Navigator.of(context).pop(
                       DishFilter(
+                        selectedCategories: Set<FoodCategory>.from(
+                          selectedCategories,
+                        ),
                         selectedProteins: Set<ProteinType>.from(
                           selectedProteins,
                         ),
@@ -2159,6 +2239,12 @@ class _MyHomePageState extends State<MyHomePage> {
 
   List<Widget> _buildActiveFilterChips() {
     final List<Widget> chips = <Widget>[];
+    if (_activeFilter.selectedCategories.isNotEmpty) {
+      final String categories = _activeFilter.selectedCategories
+          .map((FoodCategory category) => category.label)
+          .join(', ');
+      chips.add(Chip(label: Text('Categories: $categories')));
+    }
     if (_activeFilter.selectedProteins.isNotEmpty) {
       final String proteins = _activeFilter.selectedProteins
           .map((ProteinType protein) => protein.label)
@@ -2581,6 +2667,12 @@ class _MyHomePageState extends State<MyHomePage> {
                           spacing: 8,
                           runSpacing: 8,
                           children: <Widget>[
+                            if (plannerFilter.selectedCategories.isNotEmpty)
+                              Chip(
+                                label: Text(
+                                  'Categories: ${plannerFilter.selectedCategories.map((FoodCategory category) => category.label).join(', ')}',
+                                ),
+                              ),
                             if (plannerFilter.selectedProteins.isNotEmpty)
                               Chip(
                                 label: Text(
@@ -2990,12 +3082,14 @@ class _MyHomePageState extends State<MyHomePage> {
     required String title,
     required String saveLabel,
     required String initialName,
+    required FoodCategory initialCategory,
     required List<ProteinType> initialProteins,
     required List<IngredientEntry> initialIngredients,
     required int initialDefaultPortions,
     required String? initialRecipeUrl,
   }) async {
     String draftName = initialName;
+    FoodCategory selectedCategory = initialCategory;
     final Set<ProteinType> selectedProteins = Set<ProteinType>.from(
       initialProteins,
     );
@@ -3019,9 +3113,7 @@ class _MyHomePageState extends State<MyHomePage> {
               defaultPortionsInput,
             );
             final bool canSave =
-                draftName.trim().isNotEmpty &&
-                selectedProteins.isNotEmpty &&
-                parsedDefaultPortions != null;
+                draftName.trim().isNotEmpty && parsedDefaultPortions != null;
 
             return AlertDialog(
               title: Text(title),
@@ -3047,7 +3139,31 @@ class _MyHomePageState extends State<MyHomePage> {
                         },
                       ),
                       const SizedBox(height: 16),
-                      const Text('Protein types'),
+                      const Text('Category'),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: FoodCategory.values
+                            .map((FoodCategory category) {
+                              return ChoiceChip(
+                                key: ValueKey<String>(
+                                  'dish_category_${category.storageValue}',
+                                ),
+                                selected: selectedCategory == category,
+                                avatar: Icon(category.icon, size: 16),
+                                label: Text(category.label),
+                                onSelected: (_) {
+                                  setDialogState(() {
+                                    selectedCategory = category;
+                                  });
+                                },
+                              );
+                            })
+                            .toList(growable: false),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text('Protein tags (optional)'),
                       const SizedBox(height: 8),
                       Wrap(
                         spacing: 8,
@@ -3316,6 +3432,7 @@ class _MyHomePageState extends State<MyHomePage> {
                           Navigator.of(context).pop(
                             DishEditorResult(
                               name: draftName.trim(),
+                              category: selectedCategory,
                               proteins: ProteinType.values
                                   .where(selectedProteins.contains)
                                   .toList(growable: false),
@@ -3342,6 +3459,7 @@ class _MyHomePageState extends State<MyHomePage> {
       title: 'Add food item',
       saveLabel: 'Add',
       initialName: '',
+      initialCategory: FoodCategory.main,
       initialProteins: const <ProteinType>[],
       initialIngredients: const <IngredientEntry>[],
       initialDefaultPortions: 4,
@@ -3356,6 +3474,7 @@ class _MyHomePageState extends State<MyHomePage> {
       _foodItems.add(
         FoodItem(
           name: value.name,
+          category: value.category,
           proteins: value.proteins,
           ingredients: value.ingredients,
           defaultPortions: value.defaultPortions,
@@ -3377,6 +3496,7 @@ class _MyHomePageState extends State<MyHomePage> {
       title: 'Edit dish',
       saveLabel: 'Save',
       initialName: item.name,
+      initialCategory: item.category,
       initialProteins: item.proteins,
       initialIngredients: item.ingredients,
       initialDefaultPortions: item.defaultPortions,
@@ -3390,6 +3510,7 @@ class _MyHomePageState extends State<MyHomePage> {
       final FoodItem existingItem = _foodItems[itemIndex];
       _foodItems[itemIndex] = existingItem.copyWith(
         name: edited.name,
+        category: edited.category,
         proteins: edited.proteins,
         ingredients: edited.ingredients,
         defaultPortions: edited.defaultPortions,
@@ -3679,7 +3800,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     CircleAvatar(
                       radius: 20,
                       child: primaryProtein == null
-                          ? const Icon(Icons.restaurant_menu, size: 18)
+                          ? Icon(item.category.icon, size: 18)
                           : FaIcon(primaryProtein.icon, size: 16),
                     ),
                     const SizedBox(width: 12),
@@ -3708,6 +3829,10 @@ class _MyHomePageState extends State<MyHomePage> {
                             spacing: 6,
                             runSpacing: 6,
                             children: <Widget>[
+                              _buildCompactMetric(
+                                icon: item.category.icon,
+                                label: item.category.label,
+                              ),
                               _buildCompactMetric(
                                 icon: Icons.history,
                                 label: item.cookedCount.toString(),
@@ -3772,24 +3897,29 @@ class _MyHomePageState extends State<MyHomePage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        if (item.proteins.isNotEmpty) ...<Widget>[
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            children: item.proteins
-                                .map((ProteinType protein) {
-                                  return Chip(
-                                    avatar: FaIcon(protein.icon, size: 12),
-                                    label: Text(protein.label),
-                                    visualDensity: VisualDensity.compact,
-                                    materialTapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  );
-                                })
-                                .toList(growable: false),
-                          ),
-                          const SizedBox(height: 12),
-                        ],
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: <Widget>[
+                            Chip(
+                              avatar: Icon(item.category.icon, size: 12),
+                              label: Text(item.category.label),
+                              visualDensity: VisualDensity.compact,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            ...item.proteins.map((ProteinType protein) {
+                              return Chip(
+                                avatar: FaIcon(protein.icon, size: 12),
+                                label: Text(protein.label),
+                                visualDensity: VisualDensity.compact,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              );
+                            }),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
                         Text(_cookedCountText(item.cookedCount)),
                         const SizedBox(height: 4),
                         Text(_averageRatingText(item)),

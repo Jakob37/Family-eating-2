@@ -260,6 +260,67 @@ void main() {
     expect(find.text('Chicken Pasta'), findsOneWidget);
   });
 
+  testWidgets('Can add a dessert and filter by category', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'family_eating.food_data': jsonEncode(<String, dynamic>{
+        'schemaVersion': 10,
+        'foodItems': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'name': 'Pasta',
+            'proteins': <String>['egg'],
+            'ingredients': <String>['Pasta'],
+            'cookingLogs': <Map<String, dynamic>>[],
+          },
+        ],
+      }),
+    });
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('dish_name_field')),
+      'Brownies',
+    );
+    await tester.tap(
+      find.byKey(const ValueKey<String>('dish_category_dessert')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Brownies'), findsOneWidget);
+
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String stored = prefs.getString('family_eating.food_data')!;
+    final Map<String, dynamic> payload = Map<String, dynamic>.from(
+      jsonDecode(stored) as Map,
+    );
+    final List<dynamic> items = payload['foodItems'] as List<dynamic>;
+    final Map<String, dynamic> brownies = items
+        .map((dynamic item) => Map<String, dynamic>.from(item as Map))
+        .firstWhere((Map<String, dynamic> item) => item['name'] == 'Brownies');
+    expect(brownies['category'], 'dessert');
+    expect(brownies['proteins'], isEmpty);
+
+    await tester.tap(find.byTooltip('Filter dishes'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey<String>('dish_filter_category_dessert')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Apply'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Brownies'), findsOneWidget);
+    expect(find.text('Pasta'), findsNothing);
+  });
+
   testWidgets('Can edit a dish and manage ingredients list', (
     WidgetTester tester,
   ) async {
