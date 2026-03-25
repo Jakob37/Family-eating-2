@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:family_food/data_file_access.dart';
 import 'package:family_food/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -14,6 +15,42 @@ String _weekStartKey(DateTime value) {
   final String month = monday.month.toString().padLeft(2, '0');
   final String day = monday.day.toString().padLeft(2, '0');
   return '${monday.year}-$month-$day';
+}
+
+class _FakeDataFileAccess implements DataFileAccess {
+  String? nextDirectoryPath;
+  PickedTextFile? nextPickedFile;
+  String? writtenDirectoryPath;
+  String? writtenFilename;
+  String? writtenContents;
+
+  @override
+  bool get supportsFilePickerFlow => true;
+
+  @override
+  Future<String?> pickDirectoryPath({String? dialogTitle}) async {
+    return nextDirectoryPath;
+  }
+
+  @override
+  Future<PickedTextFile?> pickTextFile({
+    List<String> allowedExtensions = const <String>['json'],
+    String? dialogTitle,
+  }) async {
+    return nextPickedFile;
+  }
+
+  @override
+  Future<String?> writeTextFile({
+    required String directoryPath,
+    required String filename,
+    required String contents,
+  }) async {
+    writtenDirectoryPath = directoryPath;
+    writtenFilename = filename;
+    writtenContents = contents;
+    return '$directoryPath/$filename';
+  }
 }
 
 void main() {
@@ -386,6 +423,14 @@ void main() {
   testWidgets('Can export and import app data as JSON', (
     WidgetTester tester,
   ) async {
+    final DataFileAccess originalFileAccess = appDataFileAccess;
+    final _FakeDataFileAccess fakeFileAccess = _FakeDataFileAccess()
+      ..nextDirectoryPath = '/downloads/backups';
+    appDataFileAccess = fakeFileAccess;
+    addTearDown(() {
+      appDataFileAccess = originalFileAccess;
+    });
+
     SharedPreferences.setMockInitialValues(<String, Object>{
       'family_eating.food_data': jsonEncode(<String, dynamic>{
         'schemaVersion': 11,
@@ -418,16 +463,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final SelectableText exportText = tester.widget<SelectableText>(
-      find.byKey(const ValueKey<String>('json_export_text')),
+    expect(fakeFileAccess.writtenDirectoryPath, '/downloads/backups');
+    expect(
+      fakeFileAccess.writtenFilename,
+      matches(r'^family-eating-\d{4}-\d{2}-\d{2}-\d{6}\.json$'),
     );
-    expect(exportText.data, contains('"schemaVersion": 11'));
-    expect(exportText.data, contains('"Pasta"'));
-
-    await tester.tap(
-      find.byKey(const ValueKey<String>('close_json_export_button')),
-    );
-    await tester.pumpAndSettle();
+    expect(fakeFileAccess.writtenContents, contains('"schemaVersion": 11'));
+    expect(fakeFileAccess.writtenContents, contains('"Pasta"'));
+    expect(find.textContaining('Saved family-eating-'), findsOneWidget);
 
     final String replacementJson = jsonEncode(<String, dynamic>{
       'schemaVersion': 11,
@@ -445,17 +488,13 @@ void main() {
       'weekPlans': <Map<String, dynamic>>[],
       'groceryChecklistItems': <Map<String, dynamic>>[],
     });
+    fakeFileAccess.nextPickedFile = PickedTextFile(
+      name: 'family-eating-import.json',
+      contents: replacementJson,
+    );
 
     await tester.tap(
       find.byKey(const ValueKey<String>('open_json_import_button')),
-    );
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey<String>('json_import_field')),
-      replacementJson,
-    );
-    await tester.tap(
-      find.byKey(const ValueKey<String>('confirm_json_import_button')),
     );
     await tester.pumpAndSettle();
 

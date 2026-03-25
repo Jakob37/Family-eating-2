@@ -7,6 +7,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'browser_window.dart';
 import 'cloud_sync.dart';
+import 'data_file_access.dart';
+
+DataFileAccess appDataFileAccess = createDataFileAccess();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -2534,6 +2537,41 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     );
   }
 
+  String _buildJsonBackupFilename([DateTime? now]) {
+    final DateTime timestamp = (now ?? DateTime.now()).toLocal();
+    final String year = timestamp.year.toString().padLeft(4, '0');
+    final String month = timestamp.month.toString().padLeft(2, '0');
+    final String day = timestamp.day.toString().padLeft(2, '0');
+    final String hour = timestamp.hour.toString().padLeft(2, '0');
+    final String minute = timestamp.minute.toString().padLeft(2, '0');
+    final String second = timestamp.second.toString().padLeft(2, '0');
+    return 'family-eating-$year-$month-$day-$hour$minute$second.json';
+  }
+
+  Future<String?> _exportJsonFile() async {
+    final String? directoryPath = await appDataFileAccess.pickDirectoryPath(
+      dialogTitle: 'Select folder for JSON export',
+    );
+    if (directoryPath == null) {
+      return null;
+    }
+    final String filename = _buildJsonBackupFilename();
+    final String outputText = _dataStore.exportAsJsonString(
+      _currentDataSnapshot(),
+    );
+    return appDataFileAccess.writeTextFile(
+      directoryPath: directoryPath,
+      filename: filename,
+      contents: outputText,
+    );
+  }
+
+  Future<PickedTextFile?> _pickJsonImportFile() {
+    return appDataFileAccess.pickTextFile(
+      dialogTitle: 'Select JSON backup file',
+    );
+  }
+
   Future<void> _showJsonExportDialog() async {
     final String outputText = _dataStore.exportAsJsonString(
       _currentDataSnapshot(),
@@ -2743,19 +2781,49 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               setDialogState(() {
                 actionMessage = null;
               });
-              await _showJsonExportDialog();
-              if (!context.mounted) {
+              if (!appDataFileAccess.supportsFilePickerFlow) {
+                await _showJsonExportDialog();
+                if (!context.mounted) {
+                  return;
+                }
+                setDialogState(() {
+                  actionMessage = 'JSON export is ready to copy.';
+                });
                 return;
               }
-              setDialogState(() {
-                actionMessage = 'JSON export is ready to copy.';
-              });
+
+              try {
+                final String? savedPath = await _exportJsonFile();
+                if (!context.mounted || savedPath == null) {
+                  return;
+                }
+                final String filename = savedPath.split(RegExp(r'[\\/]')).last;
+                setDialogState(() {
+                  actionMessage = 'Saved $filename to the selected folder.';
+                });
+              } catch (_) {
+                if (!context.mounted) {
+                  return;
+                }
+                setDialogState(() {
+                  actionMessage = 'Could not export JSON file.';
+                });
+              }
             }
 
             Future<void> importJsonData() async {
-              final String? rawJson = await _showJsonImportDialog();
-              if (!context.mounted || rawJson == null) {
-                return;
+              String? rawJson;
+              if (appDataFileAccess.supportsFilePickerFlow) {
+                final PickedTextFile? pickedFile = await _pickJsonImportFile();
+                if (!context.mounted || pickedFile == null) {
+                  return;
+                }
+                rawJson = pickedFile.contents;
+              } else {
+                rawJson = await _showJsonImportDialog();
+                if (!context.mounted || rawJson == null) {
+                  return;
+                }
               }
 
               setDialogState(() {
@@ -2835,7 +2903,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                 ),
                                 onPressed: exportJsonData,
                                 icon: const Icon(Icons.upload_file_outlined),
-                                label: const Text('Export JSON'),
+                                label: Text(
+                                  appDataFileAccess.supportsFilePickerFlow
+                                      ? 'Export JSON file'
+                                      : 'Export JSON',
+                                ),
                               ),
                               FilledButton.tonalIcon(
                                 key: const ValueKey<String>(
@@ -2843,7 +2915,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                 ),
                                 onPressed: importJsonData,
                                 icon: const Icon(Icons.download_outlined),
-                                label: const Text('Import JSON'),
+                                label: Text(
+                                  appDataFileAccess.supportsFilePickerFlow
+                                      ? 'Import JSON file'
+                                      : 'Import JSON',
+                                ),
                               ),
                             ],
                           ),
