@@ -1822,7 +1822,54 @@ class FoodDataStore {
 
   Future<void> save(FamilyEatingData data, {bool pushRemote = true}) async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
-    final Map<String, dynamic> payload = <String, dynamic>{
+    final Map<String, dynamic> payload = _payloadFromData(data);
+    await prefs.setString(_dataKey, jsonEncode(payload));
+    if (pushRemote) {
+      await AppCloudSync.instance.pushLatestSnapshot(payload);
+    }
+  }
+
+  String exportAsJsonString(FamilyEatingData data) {
+    return const JsonEncoder.withIndent('  ').convert(_payloadFromData(data));
+  }
+
+  Future<FamilyEatingData> importFromJsonString(
+    String rawPayload, {
+    bool pushRemote = true,
+  }) async {
+    final dynamic decoded = _tryDecodeJson(rawPayload);
+
+    Map<String, dynamic> source;
+    if (decoded is Map) {
+      source = Map<String, dynamic>.from(decoded);
+    } else if (decoded is List) {
+      source = <String, dynamic>{'schemaVersion': 1, 'foodItems': decoded};
+    } else {
+      throw const FormatException('Invalid JSON payload.');
+    }
+
+    final Map<String, dynamic> migrated = _migrator.migrate(source);
+    final FamilyEatingData data = FamilyEatingData(
+      foodItems: _decodeFoodItems(migrated['foodItems']),
+      routineItems: _decodeRoutineItems(migrated['routineItems']),
+      weekPlans: _decodeWeekPlans(
+        migrated['weekPlans'] ?? migrated['weekPlan'],
+      ),
+      groceryChecklistItems: _decodeGroceryChecklistItems(
+        migrated['groceryChecklistItems'],
+      ),
+    );
+    await save(data, pushRemote: pushRemote);
+    return data;
+  }
+
+  Future<void> _clearStoredData(SharedPreferences prefs) async {
+    await prefs.remove(_dataKey);
+    await prefs.remove(_legacyFoodNamesKey);
+  }
+
+  Map<String, dynamic> _payloadFromData(FamilyEatingData data) {
+    return <String, dynamic>{
       'schemaVersion': FoodDataMigrator.currentVersion,
       'foodItems': data.foodItems
           .map((FoodItem item) => item.toJson())
@@ -1837,15 +1884,6 @@ class FoodDataStore {
           .map((GroceryChecklistItem item) => item.toJson())
           .toList(),
     };
-    await prefs.setString(_dataKey, jsonEncode(payload));
-    if (pushRemote) {
-      await AppCloudSync.instance.pushLatestSnapshot(payload);
-    }
-  }
-
-  Future<void> _clearStoredData(SharedPreferences prefs) async {
-    await prefs.remove(_dataKey);
-    await prefs.remove(_legacyFoodNamesKey);
   }
 
   dynamic _tryDecodeJson(String rawPayload) {
@@ -2485,6 +2523,166 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     return '${cloudSync.activeHouseholdName} connected. $syncedAt';
   }
 
+  FamilyEatingData _currentDataSnapshot() {
+    return FamilyEatingData(
+      foodItems: List<FoodItem>.from(_foodItems),
+      routineItems: List<RoutineFoodItem>.from(_routineItems),
+      weekPlans: List<WeekPlan>.from(_weekPlans),
+      groceryChecklistItems: List<GroceryChecklistItem>.from(
+        _groceryChecklistItems,
+      ),
+    );
+  }
+
+  Future<void> _showJsonExportDialog() async {
+    final String outputText = _dataStore.exportAsJsonString(
+      _currentDataSnapshot(),
+    );
+
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        Future<void> copyJson() async {
+          await Clipboard.setData(ClipboardData(text: outputText));
+          if (!context.mounted) {
+            return;
+          }
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('JSON copied.')));
+        }
+
+        return AlertDialog(
+          title: const Text('Export JSON'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Text(
+                  'This is the app data JSON. You can copy it now and import it later on this or another device.',
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(maxHeight: 320),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      outputText,
+                      key: const ValueKey<String>('json_export_text'),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              key: const ValueKey<String>('close_json_export_button'),
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+            if (supportsTextFileDownload)
+              TextButton(
+                onPressed: () {
+                  final bool didDownload = downloadTextFile(
+                    filename: 'family-eating-export.json',
+                    contents: outputText,
+                  );
+                  if (!didDownload) {
+                    return;
+                  }
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Downloaded family-eating-export.json'),
+                    ),
+                  );
+                },
+                child: const Text('Download .json'),
+              ),
+            FilledButton(onPressed: copyJson, child: const Text('Copy JSON')),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<String?> _showJsonImportDialog() async {
+    final TextEditingController controller = TextEditingController();
+    String? errorText;
+
+    final String? rawJson = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setDialogState) {
+            return AlertDialog(
+              title: const Text('Import JSON'),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    const Text(
+                      'Paste exported JSON below. Import replaces the current local data and syncs it if cloud is connected.',
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 240,
+                      child: TextField(
+                        key: const ValueKey<String>('json_import_field'),
+                        controller: controller,
+                        expands: true,
+                        minLines: null,
+                        maxLines: null,
+                        keyboardType: TextInputType.multiline,
+                        textAlignVertical: TextAlignVertical.top,
+                        decoration: InputDecoration(
+                          hintText: '{\n  "schemaVersion": 11,\n  ...\n}',
+                          border: const OutlineInputBorder(),
+                          errorText: errorText,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  key: const ValueKey<String>('confirm_json_import_button'),
+                  onPressed: () {
+                    final String trimmed = controller.text.trim();
+                    if (trimmed.isEmpty) {
+                      setDialogState(() {
+                        errorText = 'Paste JSON first.';
+                      });
+                      return;
+                    }
+                    Navigator.of(context).pop(trimmed);
+                  },
+                  child: const Text('Import'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    return rawJson;
+  }
+
   Future<void> _showAccountAndSyncDialog() async {
     final AppCloudSync cloudSync = AppCloudSync.instance;
     final TextEditingController emailController = TextEditingController(
@@ -2541,6 +2739,60 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               });
             }
 
+            Future<void> exportJsonData() async {
+              setDialogState(() {
+                actionMessage = null;
+              });
+              await _showJsonExportDialog();
+              if (!context.mounted) {
+                return;
+              }
+              setDialogState(() {
+                actionMessage = 'JSON export is ready to copy.';
+              });
+            }
+
+            Future<void> importJsonData() async {
+              final String? rawJson = await _showJsonImportDialog();
+              if (!context.mounted || rawJson == null) {
+                return;
+              }
+
+              setDialogState(() {
+                actionMessage = null;
+              });
+
+              try {
+                final FamilyEatingData importedData = await _dataStore
+                    .importFromJsonString(rawJson);
+                if (!context.mounted) {
+                  return;
+                }
+                _applyLoadedData(importedData);
+                final String? syncError = cloudSync.lastSyncError;
+                setDialogState(() {
+                  actionMessage = syncError == null
+                      ? 'JSON imported successfully.'
+                      : 'JSON imported locally. $syncError';
+                });
+              } on FormatException {
+                if (!context.mounted) {
+                  return;
+                }
+                setDialogState(() {
+                  actionMessage =
+                      'Could not import JSON. Check that the pasted data is valid.';
+                });
+              } catch (_) {
+                if (!context.mounted) {
+                  return;
+                }
+                setDialogState(() {
+                  actionMessage = 'Could not import JSON.';
+                });
+              }
+            }
+
             return AnimatedBuilder(
               animation: cloudSync,
               builder: (BuildContext context, Widget? child) {
@@ -2567,6 +2819,34 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                             const SizedBox(height: 8),
                             Text(actionMessage!),
                           ],
+                          const SizedBox(height: 16),
+                          Text(
+                            'Data backup',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: <Widget>[
+                              FilledButton.tonalIcon(
+                                key: const ValueKey<String>(
+                                  'open_json_export_button',
+                                ),
+                                onPressed: exportJsonData,
+                                icon: const Icon(Icons.upload_file_outlined),
+                                label: const Text('Export JSON'),
+                              ),
+                              FilledButton.tonalIcon(
+                                key: const ValueKey<String>(
+                                  'open_json_import_button',
+                                ),
+                                onPressed: importJsonData,
+                                icon: const Icon(Icons.download_outlined),
+                                label: const Text('Import JSON'),
+                              ),
+                            ],
+                          ),
                           const SizedBox(height: 16),
                           if (!cloudSync.isConfigured) ...<Widget>[
                             const Text(
@@ -2758,6 +3038,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   ),
                   actions: <Widget>[
                     TextButton(
+                      key: const ValueKey<String>('close_account_sync_button'),
                       onPressed: () => Navigator.of(context).pop(),
                       child: const Text('Close'),
                     ),
@@ -3266,23 +3547,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       if (!mounted) {
         return;
       }
-      setState(() {
-        _foodItems
-          ..clear()
-          ..addAll(data.foodItems);
-        _routineItems
-          ..clear()
-          ..addAll(data.routineItems);
-        _groceryChecklistItems
-          ..clear()
-          ..addAll(data.groceryChecklistItems);
-        _weekPlans
-          ..clear()
-          ..addAll(data.weekPlans);
-        _sortFoodItemsByRanking();
-        _isLoading = false;
-        _loadError = null;
-      });
+      _applyLoadedData(data);
     } catch (_) {
       if (!mounted) {
         return;
@@ -3292,6 +3557,29 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         _loadError = 'Could not load saved food items.';
       });
     }
+  }
+
+  void _applyLoadedData(FamilyEatingData data) {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _foodItems
+        ..clear()
+        ..addAll(data.foodItems);
+      _routineItems
+        ..clear()
+        ..addAll(data.routineItems);
+      _groceryChecklistItems
+        ..clear()
+        ..addAll(data.groceryChecklistItems);
+      _weekPlans
+        ..clear()
+        ..addAll(data.weekPlans);
+      _sortFoodItemsByRanking();
+      _isLoading = false;
+      _loadError = null;
+    });
   }
 
   Future<void> _persistData() async {

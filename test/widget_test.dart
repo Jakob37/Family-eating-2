@@ -383,6 +383,105 @@ void main() {
     expect(find.text('Pasta'), findsNothing);
   });
 
+  testWidgets('Can export and import app data as JSON', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'family_eating.food_data': jsonEncode(<String, dynamic>{
+        'schemaVersion': 11,
+        'foodItems': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'name': 'Pasta',
+            'category': 'main',
+            'proteins': <String>['egg'],
+            'ingredients': <Map<String, dynamic>>[],
+            'cookingLogs': <Map<String, dynamic>>[],
+            'defaultPortions': 4,
+          },
+        ],
+        'routineItems': <Map<String, dynamic>>[],
+        'weekPlans': <Map<String, dynamic>>[],
+        'groceryChecklistItems': <Map<String, dynamic>>[],
+      }),
+    });
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Pasta'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Account & sync'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('open_json_export_button')),
+    );
+    await tester.pumpAndSettle();
+
+    final SelectableText exportText = tester.widget<SelectableText>(
+      find.byKey(const ValueKey<String>('json_export_text')),
+    );
+    expect(exportText.data, contains('"schemaVersion": 11'));
+    expect(exportText.data, contains('"Pasta"'));
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('close_json_export_button')),
+    );
+    await tester.pumpAndSettle();
+
+    final String replacementJson = jsonEncode(<String, dynamic>{
+      'schemaVersion': 11,
+      'foodItems': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'name': 'Imported Dish',
+          'category': 'dessert',
+          'proteins': <String>[],
+          'ingredients': <Map<String, dynamic>>[],
+          'cookingLogs': <Map<String, dynamic>>[],
+          'defaultPortions': 6,
+        },
+      ],
+      'routineItems': <Map<String, dynamic>>[],
+      'weekPlans': <Map<String, dynamic>>[],
+      'groceryChecklistItems': <Map<String, dynamic>>[],
+    });
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('open_json_import_button')),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('json_import_field')),
+      replacementJson,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey<String>('confirm_json_import_button')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('JSON imported successfully.'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('close_account_sync_button')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Imported Dish'), findsOneWidget);
+    expect(find.text('Pasta'), findsNothing);
+
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String stored = prefs.getString('family_eating.food_data')!;
+    final Map<String, dynamic> payload = Map<String, dynamic>.from(
+      jsonDecode(stored) as Map,
+    );
+    final List<dynamic> items = payload['foodItems'] as List<dynamic>;
+    expect(items, hasLength(1));
+    expect(
+      Map<String, dynamic>.from(items.first as Map)['name'],
+      'Imported Dish',
+    );
+  });
+
   testWidgets('Can edit a dish and manage ingredients list', (
     WidgetTester tester,
   ) async {
