@@ -1950,12 +1950,14 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       <GroceryChecklistItem>[];
   final Set<String> _expandedDishNames = <String>{};
   final List<WeekPlan> _weekPlans = <WeekPlan>[];
+  final ScrollController _dishListScrollController = ScrollController();
   String _selectedWeekStart = _currentWeekStartKey();
   int _lastHandledRemoteSnapshotSignal = 0;
   int _selectedTabIndex = 0;
 
   bool _isLoading = true;
   bool _isDishSearchVisible = false;
+  bool _isWeekPlanCollapsed = false;
   String? _loadError;
   String _dishSearchQuery = '';
   DishFilter _activeFilter = DishFilter.empty;
@@ -2019,10 +2021,38 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   }
 
   List<FoodItem> _filteredFoodItems() {
-    return _foodItems
+    final String normalizedQuery = _dishSearchQuery.trim().toLowerCase();
+    final List<FoodItem> visibleItems = _foodItems
         .where((FoodItem item) => _matchesFilter(item, _activeFilter))
         .where(_matchesDishSearch)
         .toList(growable: false);
+
+    if (normalizedQuery.isNotEmpty) {
+      visibleItems.sort((FoodItem a, FoodItem b) {
+        final int scoreCompare = _searchMatchScore(
+          a,
+          normalizedQuery,
+        ).compareTo(_searchMatchScore(b, normalizedQuery));
+        if (scoreCompare != 0) {
+          return scoreCompare;
+        }
+        return _compareByRanking(a, b);
+      });
+    }
+    return visibleItems;
+  }
+
+  int _searchMatchScore(FoodItem item, String normalizedQuery) {
+    final String normalizedName = item.name.toLowerCase();
+    if (normalizedName.startsWith(normalizedQuery)) {
+      return 0;
+    }
+    if (normalizedName
+        .split(RegExp(r'\s+'))
+        .any((String part) => part.startsWith(normalizedQuery))) {
+      return 1;
+    }
+    return 2;
   }
 
   bool get _hasActiveDishSearch => _dishSearchQuery.trim().isNotEmpty;
@@ -2369,14 +2399,19 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   }
 
   void _clearDishSearch() {
-    setState(() {
-      _dishSearchQuery = '';
-      _dishSearchController.clear();
-    });
+    _dishSearchController.clear();
+    _setDishSearchQuery('');
   }
 
   Widget _buildDishSearchBar() {
     final bool showSearch = _isDishSearchVisible || _hasActiveDishSearch;
+    final int matchCount = _filteredFoodItems().length;
+    final String normalizedQuery = _dishSearchQuery.trim();
+    final String summary = normalizedQuery.isEmpty
+        ? '$matchCount dishes'
+        : matchCount == 1
+        ? '1 match'
+        : '$matchCount matches';
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 180),
       child: !showSearch
@@ -2384,32 +2419,51 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           : Padding(
               key: const ValueKey<String>('dish_search_container'),
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: TextField(
-                key: const ValueKey<String>('dish_search_field'),
-                controller: _dishSearchController,
-                autofocus: true,
-                decoration: InputDecoration(
-                  hintText: 'Search dishes',
-                  prefixIcon: const Icon(Icons.search),
-                  suffixIcon: _hasActiveDishSearch
-                      ? IconButton(
-                          tooltip: 'Clear search',
-                          onPressed: _clearDishSearch,
-                          icon: const Icon(Icons.close),
-                        )
-                      : null,
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                ),
-                textInputAction: TextInputAction.search,
-                onChanged: (String value) {
-                  setState(() {
-                    _dishSearchQuery = value;
-                  });
-                },
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  TextField(
+                    key: const ValueKey<String>('dish_search_field'),
+                    controller: _dishSearchController,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      hintText: 'Search dishes',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _hasActiveDishSearch
+                          ? IconButton(
+                              key: const ValueKey<String>(
+                                'clear_dish_search_button',
+                              ),
+                              tooltip: 'Clear search',
+                              onPressed: _clearDishSearch,
+                              icon: const Icon(Icons.close),
+                            )
+                          : null,
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    textInputAction: TextInputAction.search,
+                    onChanged: _setDishSearchQuery,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(summary, style: Theme.of(context).textTheme.bodySmall),
+                ],
               ),
             ),
     );
+  }
+
+  void _scrollDishListToTop() {
+    if (_dishListScrollController.hasClients) {
+      _dishListScrollController.jumpTo(0);
+    }
+  }
+
+  void _setDishSearchQuery(String value) {
+    setState(() {
+      _dishSearchQuery = value;
+    });
+    _scrollDishListToTop();
   }
 
   String _cloudStatusSummary(AppCloudSync cloudSync) {
@@ -3189,6 +3243,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     AppCloudSync.instance.removeListener(_handleCloudSyncChange);
     _dishSearchController.dispose();
+    _dishListScrollController.dispose();
     _groceryChecklistController.dispose();
     super.dispose();
   }
@@ -4283,136 +4338,248 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   Widget _buildWeekPlanCard() {
     final WeekPlan? weekPlan = _selectedWeekPlan;
     final bool isCurrentWeek = _selectedWeekStart == _currentWeekStartKey();
+    final int plannedCount = weekPlan?.entries.length ?? 0;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  IconButton(
-                    tooltip: 'Previous week',
-                    onPressed: () => _moveSelectedWeek(-1),
-                    icon: const Icon(Icons.chevron_left),
-                  ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          'Week plan',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        Text(
-                          _weekLabel(_selectedWeekStart),
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
+        child: AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeInOut,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    IconButton(
+                      tooltip: 'Previous week',
+                      onPressed: () => _moveSelectedWeek(-1),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 36,
+                        height: 36,
+                      ),
+                      icon: const Icon(Icons.chevron_left),
                     ),
-                  ),
-                  IconButton(
-                    tooltip: 'Next week',
-                    onPressed: () => _moveSelectedWeek(1),
-                    icon: const Icon(Icons.chevron_right),
-                  ),
-                  TextButton(
-                    onPressed: _editWeekPlan,
-                    child: Text(weekPlan == null ? 'Create' : 'Edit'),
-                  ),
-                ],
-              ),
-              if (!isCurrentWeek)
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: () {
-                      setState(() {
-                        _selectedWeekStart = _currentWeekStartKey();
-                      });
-                    },
-                    child: const Text('Jump to this week'),
-                  ),
-                ),
-              if (weekPlan == null) ...<Widget>[
-                const SizedBox(height: 6),
-                const Text('No plan saved for this week yet.'),
-              ] else ...<Widget>[
-                const SizedBox(height: 6),
-                ...weekPlan.entries.map((WeekPlanEntry entry) {
-                  final FoodItem? item = _findFoodItemByName(entry.dishName);
-                  return CheckboxListTile(
-                    key: ValueKey<String>('week_entry_${entry.dishName}'),
-                    value: entry.isCooked,
-                    contentPadding: EdgeInsets.zero,
-                    controlAffinity: ListTileControlAffinity.leading,
-                    title: Text(entry.dishName),
-                    subtitle: Text(
-                      item == null
-                          ? 'Dish missing'
-                          : 'Portions: ${entry.portions}',
-                    ),
-                    secondary: item == null
-                        ? null
-                        : IconButton(
-                            key: ValueKey<String>(
-                              'week_entry_edit_${entry.dishName}',
-                            ),
-                            tooltip: 'Edit dish',
-                            onPressed: () => _editDish(item),
-                            icon: const Icon(Icons.edit_outlined),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            'Week plan',
+                            style: Theme.of(context).textTheme.titleMedium,
                           ),
-                    onChanged: item == null
-                        ? null
-                        : (bool? value) {
-                            _toggleWeekEntryCooked(entry, value ?? false);
-                          },
-                  );
-                }),
+                          Text(
+                            '${_weekLabel(_selectedWeekStart)} - $plannedCount dishes',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Next week',
+                      onPressed: () => _moveSelectedWeek(1),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 36,
+                        height: 36,
+                      ),
+                      icon: const Icon(Icons.chevron_right),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: <Widget>[
-                    FilledButton.tonalIcon(
-                      key: const ValueKey<String>('week_grocery_trip_button'),
-                      onPressed: _openWeekGroceryTrip,
-                      icon: const Icon(Icons.shopping_cart_checkout),
-                      label: const Text('Week grocery trip'),
+                    IconButton(
+                      tooltip: weekPlan == null
+                          ? 'Create week plan'
+                          : 'Edit week plan',
+                      onPressed: _editWeekPlan,
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 36,
+                        height: 36,
+                      ),
+                      icon: FaIcon(
+                        weekPlan == null
+                            ? FontAwesomeIcons.plus
+                            : FontAwesomeIcons.penToSquare,
+                        size: 16,
+                      ),
                     ),
-                    OutlinedButton(
-                      onPressed: () async {
-                        final String nextWeekStart = _shiftWeekStartKey(
-                          _selectedWeekStart,
-                          1,
-                        );
+                    if (!isCurrentWeek)
+                      IconButton(
+                        tooltip: 'Jump to this week',
+                        onPressed: () {
+                          setState(() {
+                            _selectedWeekStart = _currentWeekStartKey();
+                          });
+                        },
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 36,
+                          height: 36,
+                        ),
+                        icon: const FaIcon(
+                          FontAwesomeIcons.calendarDay,
+                          size: 16,
+                        ),
+                      ),
+                    IconButton(
+                      key: const ValueKey<String>('week_plan_toggle'),
+                      tooltip: _isWeekPlanCollapsed
+                          ? 'Show week plan'
+                          : 'Hide week plan',
+                      onPressed: () {
                         setState(() {
-                          _upsertWeekPlan(
-                            weekPlan.copyWith(
-                              weekStart: nextWeekStart,
-                              entries: weekPlan.entries
-                                  .map((WeekPlanEntry entry) {
-                                    return entry.copyWith(isCooked: false);
-                                  })
-                                  .toList(growable: false),
-                            ),
-                          );
-                          _selectedWeekStart = nextWeekStart;
+                          _isWeekPlanCollapsed = !_isWeekPlanCollapsed;
                         });
-                        await _persistData();
                       },
-                      child: const Text('Copy to next week'),
-                    ),
-                    OutlinedButton(
-                      onPressed: _clearWeekPlan,
-                      child: const Text('Clear week'),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 36,
+                        height: 36,
+                      ),
+                      icon: FaIcon(
+                        _isWeekPlanCollapsed
+                            ? FontAwesomeIcons.eye
+                            : FontAwesomeIcons.eyeSlash,
+                        size: 16,
+                      ),
                     ),
                   ],
                 ),
+                if (!_isWeekPlanCollapsed) ...<Widget>[
+                  if (weekPlan == null) ...<Widget>[
+                    const SizedBox(height: 6),
+                    const Text('No plan saved for this week yet.'),
+                  ] else ...<Widget>[
+                    const SizedBox(height: 4),
+                    ...weekPlan.entries.map((WeekPlanEntry entry) {
+                      final FoodItem? item = _findFoodItemByName(
+                        entry.dishName,
+                      );
+                      return CheckboxListTile(
+                        key: ValueKey<String>('week_entry_${entry.dishName}'),
+                        value: entry.isCooked,
+                        dense: true,
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: Text(entry.dishName),
+                        subtitle: item == null
+                            ? const Text('Dish missing')
+                            : null,
+                        secondary: item == null
+                            ? null
+                            : IconButton(
+                                key: ValueKey<String>(
+                                  'week_entry_edit_${entry.dishName}',
+                                ),
+                                tooltip: 'Edit dish',
+                                onPressed: () => _editDish(item),
+                                icon: const Icon(Icons.edit_outlined),
+                              ),
+                        onChanged: item == null
+                            ? null
+                            : (bool? value) {
+                                _toggleWeekEntryCooked(entry, value ?? false);
+                              },
+                      );
+                    }),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        Tooltip(
+                          message: 'Open grocery trip from this week plan',
+                          child: FilledButton(
+                            key: const ValueKey<String>(
+                              'week_grocery_trip_button',
+                            ),
+                            onPressed: _openWeekGroceryTrip,
+                            style: FilledButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              minimumSize: const Size(36, 36),
+                              padding: EdgeInsets.zero,
+                            ),
+                            child: const Icon(
+                              Icons.shopping_cart_checkout,
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                        Tooltip(
+                          message: 'Copy to next week',
+                          child: OutlinedButton(
+                            onPressed: () async {
+                              final String nextWeekStart = _shiftWeekStartKey(
+                                _selectedWeekStart,
+                                1,
+                              );
+                              setState(() {
+                                _upsertWeekPlan(
+                                  weekPlan.copyWith(
+                                    weekStart: nextWeekStart,
+                                    entries: weekPlan.entries
+                                        .map((WeekPlanEntry entry) {
+                                          return entry.copyWith(
+                                            isCooked: false,
+                                          );
+                                        })
+                                        .toList(growable: false),
+                                  ),
+                                );
+                                _selectedWeekStart = nextWeekStart;
+                              });
+                              await _persistData();
+                            },
+                            style: OutlinedButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              minimumSize: const Size(36, 36),
+                              padding: EdgeInsets.zero,
+                            ),
+                            child: const FaIcon(
+                              FontAwesomeIcons.copy,
+                              size: 16,
+                            ),
+                          ),
+                        ),
+                        Tooltip(
+                          message: 'Clear week plan',
+                          child: OutlinedButton(
+                            onPressed: _clearWeekPlan,
+                            style: OutlinedButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              minimumSize: const Size(36, 36),
+                              padding: EdgeInsets.zero,
+                            ),
+                            child: const FaIcon(
+                              FontAwesomeIcons.trashCan,
+                              size: 16,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -4469,8 +4636,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
     final List<FoodItem> visibleFoodItems = _filteredFoodItems();
     if (visibleFoodItems.isEmpty) {
+      final String trimmedQuery = _dishSearchQuery.trim();
       final bool hasActiveConstraints =
-          _activeFilter.hasActiveFilters || _hasActiveDishSearch;
+          _activeFilter.hasActiveFilters || trimmedQuery.isNotEmpty;
       return Column(
         children: <Widget>[
           Padding(
@@ -4493,25 +4661,38 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   Text(
-                    hasActiveConstraints
-                        ? 'No dishes match the current filters or search.'
+                    trimmedQuery.isNotEmpty
+                        ? 'No dishes match "$trimmedQuery".'
+                        : _activeFilter.hasActiveFilters
+                        ? 'No dishes match current filters.'
                         : 'No dishes match.',
                   ),
                   const SizedBox(height: 12),
-                  OutlinedButton(
-                    onPressed: () {
-                      setState(() {
-                        _activeFilter = DishFilter.empty;
-                        _dishSearchQuery = '';
-                        _dishSearchController.clear();
-                        _isDishSearchVisible = false;
-                      });
-                    },
-                    child: Text(
-                      hasActiveConstraints
-                          ? 'Clear filters and search'
-                          : 'Clear',
-                    ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: <Widget>[
+                      if (trimmedQuery.isNotEmpty)
+                        OutlinedButton(
+                          onPressed: _clearDishSearch,
+                          child: const Text('Clear search'),
+                        ),
+                      if (_activeFilter.hasActiveFilters)
+                        OutlinedButton(
+                          onPressed: () {
+                            setState(() {
+                              _activeFilter = DishFilter.empty;
+                            });
+                          },
+                          child: const Text('Clear filters'),
+                        ),
+                      if (!hasActiveConstraints)
+                        OutlinedButton(
+                          onPressed: _toggleDishSearch,
+                          child: const Text('Clear'),
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -4559,6 +4740,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           ),
         Expanded(
           child: ListView.builder(
+            controller: _dishListScrollController,
             itemCount: visibleFoodItems.length,
             itemBuilder: (BuildContext context, int index) {
               final FoodItem item = visibleFoodItems[index];
@@ -4832,6 +5014,7 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
   final List<WeekPlan> _weekPlans = <WeekPlan>[];
 
   bool _isLoading = true;
+  bool _isSummaryCollapsed = false;
   String? _loadError;
 
   @override
@@ -5558,6 +5741,143 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
     return _selectedDishes.values.toList(growable: false);
   }
 
+  String _selectionSummaryText(List<GroceryTripDishSelection> selections) {
+    if (selections.isEmpty) {
+      return 'Pick dishes below.';
+    }
+    return selections
+        .map((GroceryTripDishSelection selection) => selection.item.name)
+        .join(', ');
+  }
+
+  Widget _buildSummaryCard({
+    required List<GroceryTripDishSelection> selections,
+    required List<GroceryListItem> groceryItems,
+  }) {
+    final ThemeData theme = Theme.of(context);
+    final String subtitle = widget.preloadWeekPlan
+        ? '${selections.length} selected - Loaded from saved week plan'
+        : '${selections.length} selected';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      child: Card(
+        child: AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeInOut,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            'Selected dishes',
+                            style: theme.textTheme.titleMedium,
+                          ),
+                          Text(subtitle, style: theme.textTheme.bodySmall),
+                        ],
+                      ),
+                    ),
+                    TextButton(
+                      key: const ValueKey<String>('grocery_summary_toggle'),
+                      onPressed: () {
+                        setState(() {
+                          _isSummaryCollapsed = !_isSummaryCollapsed;
+                        });
+                      },
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: Text(_isSummaryCollapsed ? 'Show' : 'Hide'),
+                    ),
+                  ],
+                ),
+                if (!_isSummaryCollapsed) ...<Widget>[
+                  const SizedBox(height: 8),
+                  Text(
+                    _selectionSummaryText(selections),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      FilledButton.tonalIcon(
+                        key: const ValueKey<String>(
+                          'get_ingredients_list_button',
+                        ),
+                        onPressed: groceryItems.isEmpty
+                            ? null
+                            : _showIngredientListDialog,
+                        icon: const Icon(
+                          Icons.shopping_cart_outlined,
+                          size: 18,
+                        ),
+                        label: const Text('Ingredients'),
+                        style: FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: _showRoutineItemManager,
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                        label: const Text('Routine foods'),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  if (_routineItems.isEmpty)
+                    Text(
+                      'No routine foods yet. Add staples you buy often.',
+                      style: theme.textTheme.bodySmall,
+                    )
+                  else
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: _routineItems
+                          .map((RoutineFoodItem item) {
+                            return FilterChip(
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                              visualDensity: VisualDensity.compact,
+                              labelPadding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                              ),
+                              selected: _isRoutineSelected(item),
+                              label: Text(item.ingredient.displayLabel),
+                              onSelected: (_) => _toggleRoutineSelection(item),
+                            );
+                          })
+                          .toList(growable: false),
+                    ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     Widget body;
@@ -5593,84 +5913,7 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
 
       body = Column(
         children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      'Selected dishes: ${selections.length}',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      selections.isEmpty
-                          ? 'Pick dishes below. Each selected dish starts with its saved recipe portions.'
-                          : selections
-                                .map((GroceryTripDishSelection selection) {
-                                  return '${selection.item.name} (${selection.portions})';
-                                })
-                                .join(', '),
-                    ),
-                    if (widget.preloadWeekPlan) ...<Widget>[
-                      const SizedBox(height: 8),
-                      const Text('Loaded from the saved week plan.'),
-                    ],
-                    const SizedBox(height: 12),
-                    Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            'Routine foods',
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: _showRoutineItemManager,
-                          child: const Text('Manage'),
-                        ),
-                      ],
-                    ),
-                    if (_routineItems.isEmpty)
-                      const Text(
-                        'No routine foods yet. Add staples you buy often.',
-                      )
-                    else
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: _routineItems
-                            .map((RoutineFoodItem item) {
-                              return FilterChip(
-                                selected: _isRoutineSelected(item),
-                                label: Text(item.ingredient.displayLabel),
-                                onSelected: (_) =>
-                                    _toggleRoutineSelection(item),
-                              );
-                            })
-                            .toList(growable: false),
-                      ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        key: const ValueKey<String>(
-                          'get_ingredients_list_button',
-                        ),
-                        onPressed: groceryItems.isEmpty
-                            ? null
-                            : _showIngredientListDialog,
-                        child: const Text('Get ingredients list'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+          _buildSummaryCard(selections: selections, groceryItems: groceryItems),
           Expanded(
             child: ListView.builder(
               itemCount: _foodItems.length,

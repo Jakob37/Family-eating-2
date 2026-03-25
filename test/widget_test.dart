@@ -94,6 +94,9 @@ void main() {
     await tester.pumpWidget(const MyApp());
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const ValueKey<String>('week_plan_toggle')));
+    await tester.pumpAndSettle();
+
     await tester.scrollUntilVisible(
       find.byKey(const ValueKey<String>('dish_card_Soup')),
       200,
@@ -111,7 +114,13 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey<String>('dish_log_Pasta')));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), '30');
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      '30',
+    );
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
@@ -125,6 +134,8 @@ void main() {
     expect(find.text('Cooked 2 times'), findsOneWidget);
     expect(find.text('Avg rating: 3.0/5'), findsOneWidget);
     expect(find.text('Avg time: 30.0 min'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey<String>('dish_card_Pasta')));
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.byKey(const ValueKey<String>('dish_card_Soup')),
       200,
@@ -208,7 +219,7 @@ void main() {
     expect(find.text('Tofu Bowl'), findsNothing);
   });
 
-  testWidgets('Dish search is toggleable and filters the list', (
+  testWidgets('Dish search is toggleable, filters the list, and can clear', (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues(<String, Object>{
@@ -216,18 +227,29 @@ void main() {
         'schemaVersion': 10,
         'foodItems': <Map<String, dynamic>>[
           <String, dynamic>{
-            'name': 'Tomato Soup',
-            'proteins': <String>['fish'],
-            'ingredients': <String>['Tomato'],
+            'name': 'Bolognese',
+            'proteins': <String>['meat'],
+            'ingredients': <Map<String, dynamic>>[],
             'cookingLogs': <Map<String, dynamic>>[],
+            'defaultPortions': 4,
           },
           <String, dynamic>{
-            'name': 'Chicken Pasta',
-            'proteins': <String>['chicken'],
-            'ingredients': <String>['Chicken'],
+            'name': 'Tomato Soup',
+            'proteins': <String>['fish'],
+            'ingredients': <Map<String, dynamic>>[],
             'cookingLogs': <Map<String, dynamic>>[],
+            'defaultPortions': 2,
+          },
+          <String, dynamic>{
+            'name': 'Taco Tray',
+            'proteins': <String>['chicken'],
+            'ingredients': <Map<String, dynamic>>[],
+            'cookingLogs': <Map<String, dynamic>>[],
+            'defaultPortions': 3,
           },
         ],
+        'routineItems': <Map<String, dynamic>>[],
+        'weekPlans': <Map<String, dynamic>>[],
       }),
     });
 
@@ -248,6 +270,7 @@ void main() {
       find.byKey(const ValueKey<String>('dish_search_field')),
       findsOneWidget,
     );
+    expect(find.text('3 dishes'), findsOneWidget);
 
     await tester.enterText(
       find.byKey(const ValueKey<String>('dish_search_field')),
@@ -255,8 +278,38 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Tomato Soup'), findsOneWidget);
-    expect(find.text('Chicken Pasta'), findsNothing);
+    expect(find.text('1 match'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('dish_card_Tomato Soup')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('dish_card_Bolognese')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('dish_card_Taco Tray')),
+      findsNothing,
+    );
+
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('dish_search_field')),
+      'zzz',
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('No dishes match "zzz".'), findsOneWidget);
+    expect(find.text('0 matches'), findsOneWidget);
+
+    await tester.tap(find.text('Clear search'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('3 dishes'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('dish_card_Bolognese')),
+      findsOneWidget,
+    );
+    expect(find.text('No dishes match "zzz".'), findsNothing);
 
     await tester.tap(
       find.byKey(const ValueKey<String>('toggle_dish_search_button')),
@@ -267,8 +320,6 @@ void main() {
       find.byKey(const ValueKey<String>('dish_search_field')),
       findsNothing,
     );
-    expect(find.text('Tomato Soup'), findsOneWidget);
-    expect(find.text('Chicken Pasta'), findsOneWidget);
   });
 
   testWidgets('Can add a dessert and filter by category', (
@@ -629,6 +680,23 @@ void main() {
       find.byKey(const ValueKey<String>('week_entry_Bolognese')),
       findsOneWidget,
     );
+    expect(find.text('Portions: 8'), findsNothing);
+    expect(find.text('Portions: 2'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey<String>('week_plan_toggle')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey<String>('week_entry_Bolognese')),
+      findsNothing,
+    );
+
+    await tester.tap(find.byKey(const ValueKey<String>('week_plan_toggle')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey<String>('week_entry_Bolognese')),
+      findsOneWidget,
+    );
+
     await tester.tap(
       find.byKey(const ValueKey<String>('week_entry_Bolognese')),
     );
@@ -654,8 +722,27 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Selected dishes: 2'), findsOneWidget);
+    expect(find.text('Selected dishes'), findsOneWidget);
+    expect(
+      find.text('2 selected - Loaded from saved week plan'),
+      findsOneWidget,
+    );
+    expect(find.text('Bolognese, Soup'), findsOneWidget);
+    expect(find.text('Bolognese (8), Soup (2)'), findsNothing);
     expect(find.text('Selected'), findsNWidgets(2));
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('grocery_summary_toggle')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Ingredients'), findsNothing);
+    expect(find.text('Bolognese, Soup'), findsNothing);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('grocery_summary_toggle')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Ingredients'), findsOneWidget);
 
     await tester.tap(
       find.byKey(const ValueKey<String>('get_ingredients_list_button')),
@@ -785,7 +872,7 @@ void main() {
     await tester.tap(find.byTooltip('Previous week'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Last week'), findsOneWidget);
+    expect(find.text('Last week - 1 dishes'), findsOneWidget);
     expect(
       find.byKey(const ValueKey<String>('week_entry_Previous Dish')),
       findsOneWidget,
@@ -838,7 +925,7 @@ void main() {
     await tester.pumpWidget(const MyApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Create'));
+    await tester.tap(find.byTooltip('Create week plan'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Filter'));
