@@ -455,7 +455,7 @@ void main() {
 
     expect(find.text('Pasta'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Account & sync'));
+    await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
 
     await tester.tap(
@@ -500,9 +500,7 @@ void main() {
 
     expect(find.text('JSON imported successfully.'), findsOneWidget);
 
-    await tester.tap(
-      find.byKey(const ValueKey<String>('close_account_sync_button')),
-    );
+    await tester.pageBack();
     await tester.pumpAndSettle();
 
     expect(find.text('Imported Dish'), findsOneWidget);

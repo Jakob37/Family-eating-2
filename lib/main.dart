@@ -34,6 +34,11 @@ class MyApp extends StatelessWidget {
         final Uri routeUri =
             Uri.tryParse(settings.name ?? '/') ?? Uri(path: '/');
         switch (routeUri.path) {
+          case FamilySettingsPage.routeName:
+            return MaterialPageRoute<void>(
+              builder: (BuildContext context) => const FamilySettingsPage(),
+              settings: settings,
+            );
           case GroceryTripPage.routeName:
             return MaterialPageRoute<void>(
               builder: (BuildContext context) => const GroceryTripPage(),
@@ -1983,7 +1988,6 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
-  static final Uri _changelogUri = Uri.parse(kAppChangelogUrl);
   final FoodDataStore _dataStore = FoodDataStore();
   final TextEditingController _dishSearchController = TextEditingController();
   final TextEditingController _groceryChecklistController =
@@ -2725,414 +2729,81 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _showAccountAndSyncDialog() async {
-    final AppCloudSync cloudSync = AppCloudSync.instance;
-    final TextEditingController emailController = TextEditingController(
-      text: cloudSync.currentUserEmail ?? '',
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => FamilySettingsPage(
+          cloudStatusSummary: _cloudStatusSummary,
+          onExportJsonData: _exportJsonDataForSettings,
+          onImportJsonData: _importJsonDataForSettings,
+          onPullLatestHouseholdData: _pullLatestHouseholdDataForSettings,
+          onReloadData: _reloadDataForSettings,
+        ),
+      ),
     );
-    final TextEditingController householdNameController =
-        TextEditingController();
-    final TextEditingController inviteCodeController = TextEditingController();
-    String? actionMessage;
-    HouseholdInvite? latestInvite;
+  }
 
-    await showDialog<void>(
-      context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setDialogState) {
-            Future<void> runAction(
-              Future<String?> Function() action, {
-              String? successMessage,
-            }) async {
-              setDialogState(() {
-                actionMessage = null;
-              });
-              final String? result = await action();
-              if (!context.mounted) {
-                return;
-              }
-              setDialogState(() {
-                actionMessage =
-                    result ??
-                    successMessage ??
-                    'Done. If you used email sign-in, open the link from your inbox on this device.';
-              });
-              setState(() {
-                _isLoading = true;
-                _loadError = null;
-              });
-              _loadFoodItems();
-            }
+  Future<String?> _exportJsonDataForSettings() async {
+    if (!appDataFileAccess.supportsFilePickerFlow) {
+      await _showJsonExportDialog();
+      return 'JSON export is ready to copy.';
+    }
 
-            Future<void> createInviteCode() async {
-              setDialogState(() {
-                actionMessage = null;
-              });
-              final HouseholdInvite? invite = await cloudSync.createInvite();
-              if (!context.mounted) {
-                return;
-              }
-              setDialogState(() {
-                latestInvite = invite;
-                actionMessage = invite == null
-                    ? cloudSync.lastSyncError ?? 'Could not create invite code.'
-                    : 'Invite code ready to share.';
-              });
-            }
+    try {
+      final String? savedPath = await _exportJsonFile();
+      if (savedPath == null) {
+        return null;
+      }
+      final String filename = savedPath.split(RegExp(r'[\\/]')).last;
+      return 'Saved $filename to the selected folder.';
+    } catch (_) {
+      return 'Could not export JSON file.';
+    }
+  }
 
-            Future<void> exportJsonData() async {
-              setDialogState(() {
-                actionMessage = null;
-              });
-              if (!appDataFileAccess.supportsFilePickerFlow) {
-                await _showJsonExportDialog();
-                if (!context.mounted) {
-                  return;
-                }
-                setDialogState(() {
-                  actionMessage = 'JSON export is ready to copy.';
-                });
-                return;
-              }
+  Future<String?> _importJsonDataForSettings() async {
+    String? rawJson;
+    if (appDataFileAccess.supportsFilePickerFlow) {
+      final PickedTextFile? pickedFile = await _pickJsonImportFile();
+      if (pickedFile == null) {
+        return null;
+      }
+      rawJson = pickedFile.contents;
+    } else {
+      rawJson = await _showJsonImportDialog();
+      if (rawJson == null) {
+        return null;
+      }
+    }
 
-              try {
-                final String? savedPath = await _exportJsonFile();
-                if (!context.mounted || savedPath == null) {
-                  return;
-                }
-                final String filename = savedPath.split(RegExp(r'[\\/]')).last;
-                setDialogState(() {
-                  actionMessage = 'Saved $filename to the selected folder.';
-                });
-              } catch (_) {
-                if (!context.mounted) {
-                  return;
-                }
-                setDialogState(() {
-                  actionMessage = 'Could not export JSON file.';
-                });
-              }
-            }
+    try {
+      final FamilyEatingData importedData = await _dataStore
+          .importFromJsonString(rawJson);
+      _applyLoadedData(importedData);
+      final String? syncError = AppCloudSync.instance.lastSyncError;
+      return syncError == null
+          ? 'JSON imported successfully.'
+          : 'JSON imported locally. $syncError';
+    } on FormatException {
+      return 'Could not import JSON. Check that the pasted data is valid.';
+    } catch (_) {
+      return 'Could not import JSON.';
+    }
+  }
 
-            Future<void> importJsonData() async {
-              String? rawJson;
-              if (appDataFileAccess.supportsFilePickerFlow) {
-                final PickedTextFile? pickedFile = await _pickJsonImportFile();
-                if (!context.mounted || pickedFile == null) {
-                  return;
-                }
-                rawJson = pickedFile.contents;
-              } else {
-                rawJson = await _showJsonImportDialog();
-                if (!context.mounted || rawJson == null) {
-                  return;
-                }
-              }
+  Future<void> _reloadDataForSettings() async {
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
+    await _loadFoodItems();
+  }
 
-              setDialogState(() {
-                actionMessage = null;
-              });
-
-              try {
-                final FamilyEatingData importedData = await _dataStore
-                    .importFromJsonString(rawJson);
-                if (!context.mounted) {
-                  return;
-                }
-                _applyLoadedData(importedData);
-                final String? syncError = cloudSync.lastSyncError;
-                setDialogState(() {
-                  actionMessage = syncError == null
-                      ? 'JSON imported successfully.'
-                      : 'JSON imported locally. $syncError';
-                });
-              } on FormatException {
-                if (!context.mounted) {
-                  return;
-                }
-                setDialogState(() {
-                  actionMessage =
-                      'Could not import JSON. Check that the pasted data is valid.';
-                });
-              } catch (_) {
-                if (!context.mounted) {
-                  return;
-                }
-                setDialogState(() {
-                  actionMessage = 'Could not import JSON.';
-                });
-              }
-            }
-
-            return AnimatedBuilder(
-              animation: cloudSync,
-              builder: (BuildContext context, Widget? child) {
-                return AlertDialog(
-                  title: const Text('Account & sync'),
-                  content: SizedBox(
-                    width: double.maxFinite,
-                    child: SingleChildScrollView(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(_cloudStatusSummary(cloudSync)),
-                          if (cloudSync.lastSyncError != null) ...<Widget>[
-                            const SizedBox(height: 8),
-                            Text(
-                              'Latest sync error: ${cloudSync.lastSyncError}',
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.error,
-                              ),
-                            ),
-                          ],
-                          if (actionMessage != null) ...<Widget>[
-                            const SizedBox(height: 8),
-                            Text(actionMessage!),
-                          ],
-                          const SizedBox(height: 16),
-                          Text(
-                            'Data backup',
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: <Widget>[
-                              FilledButton.tonalIcon(
-                                key: const ValueKey<String>(
-                                  'open_json_export_button',
-                                ),
-                                onPressed: exportJsonData,
-                                icon: const Icon(Icons.upload_file_outlined),
-                                label: Text(
-                                  appDataFileAccess.supportsFilePickerFlow
-                                      ? 'Export JSON file'
-                                      : 'Export JSON',
-                                ),
-                              ),
-                              FilledButton.tonalIcon(
-                                key: const ValueKey<String>(
-                                  'open_json_import_button',
-                                ),
-                                onPressed: importJsonData,
-                                icon: const Icon(Icons.download_outlined),
-                                label: Text(
-                                  appDataFileAccess.supportsFilePickerFlow
-                                      ? 'Import JSON file'
-                                      : 'Import JSON',
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          if (!cloudSync.isConfigured) ...<Widget>[
-                            const Text(
-                              'Supabase is not configured in this build yet. You can keep using the app locally, then add cloud config later.',
-                            ),
-                          ] else ...<Widget>[
-                            TextField(
-                              controller: emailController,
-                              keyboardType: TextInputType.emailAddress,
-                              decoration: const InputDecoration(
-                                labelText: 'Email',
-                                hintText: 'you@example.com',
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            FilledButton(
-                              onPressed: cloudSync.isSyncing
-                                  ? null
-                                  : () {
-                                      runAction(
-                                        () => cloudSync.signInWithEmailOtp(
-                                          emailController.text,
-                                        ),
-                                        successMessage:
-                                            'Sign-in link sent. Open it from your inbox on this device.',
-                                      );
-                                    },
-                              child: const Text('Send sign-in link'),
-                            ),
-                            if (cloudSync.hasSession) ...<Widget>[
-                              const SizedBox(height: 16),
-                              TextField(
-                                controller: householdNameController,
-                                decoration: const InputDecoration(
-                                  labelText: 'New household name',
-                                  hintText: 'e.g. Family eating',
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              FilledButton.tonal(
-                                onPressed: cloudSync.isSyncing
-                                    ? null
-                                    : () {
-                                        runAction(
-                                          () => cloudSync.createHousehold(
-                                            householdNameController.text,
-                                          ),
-                                          successMessage:
-                                              'Household created and connected.',
-                                        );
-                                      },
-                                child: const Text('Create household'),
-                              ),
-                              const SizedBox(height: 16),
-                              TextField(
-                                controller: inviteCodeController,
-                                decoration: const InputDecoration(
-                                  labelText: 'Invite code',
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              FilledButton.tonal(
-                                onPressed: cloudSync.isSyncing
-                                    ? null
-                                    : () {
-                                        runAction(
-                                          () => cloudSync.joinHousehold(
-                                            inviteCodeController.text,
-                                          ),
-                                          successMessage:
-                                              'Joined household successfully.',
-                                        );
-                                      },
-                                child: const Text('Join household'),
-                              ),
-                              if (cloudSync.hasActiveHousehold) ...<Widget>[
-                                const SizedBox(height: 16),
-                                FilledButton.tonalIcon(
-                                  onPressed: cloudSync.isSyncing
-                                      ? null
-                                      : createInviteCode,
-                                  icon: const Icon(Icons.person_add_alt_1),
-                                  label: const Text('Create invite code'),
-                                ),
-                                if (latestInvite != null) ...<Widget>[
-                                  const SizedBox(height: 8),
-                                  DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.surfaceContainerHighest,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(12),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: <Widget>[
-                                          Text(
-                                            'Invite code',
-                                            style: Theme.of(
-                                              context,
-                                            ).textTheme.labelLarge,
-                                          ),
-                                          const SizedBox(height: 6),
-                                          SelectableText(
-                                            latestInvite!.code,
-                                            style: Theme.of(
-                                              context,
-                                            ).textTheme.titleMedium,
-                                          ),
-                                          if (latestInvite!.expiresAt != null)
-                                            Padding(
-                                              padding: const EdgeInsets.only(
-                                                top: 6,
-                                              ),
-                                              child: Text(
-                                                'Expires ${latestInvite!.expiresAt!.toLocal()}',
-                                                style: Theme.of(
-                                                  context,
-                                                ).textTheme.bodySmall,
-                                              ),
-                                            ),
-                                          const SizedBox(height: 8),
-                                          FilledButton.tonalIcon(
-                                            onPressed: () async {
-                                              await Clipboard.setData(
-                                                ClipboardData(
-                                                  text: latestInvite!.code,
-                                                ),
-                                              );
-                                              if (!context.mounted) {
-                                                return;
-                                              }
-                                              ScaffoldMessenger.of(
-                                                context,
-                                              ).showSnackBar(
-                                                const SnackBar(
-                                                  content: Text(
-                                                    'Invite code copied.',
-                                                  ),
-                                                ),
-                                              );
-                                            },
-                                            icon: const Icon(Icons.copy),
-                                            label: const Text('Copy code'),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                                const SizedBox(height: 16),
-                                FilledButton.tonalIcon(
-                                  onPressed: cloudSync.isSyncing
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            _isLoading = true;
-                                            _loadError = null;
-                                          });
-                                          _loadFoodItems();
-                                          Navigator.of(context).pop();
-                                        },
-                                  icon: const Icon(Icons.sync),
-                                  label: const Text(
-                                    'Pull latest household data',
-                                  ),
-                                ),
-                              ],
-                              const SizedBox(height: 12),
-                              TextButton(
-                                onPressed: cloudSync.isSyncing
-                                    ? null
-                                    : () {
-                                        runAction(
-                                          cloudSync.signOut,
-                                          successMessage: 'Signed out.',
-                                        );
-                                      },
-                                child: const Text('Sign out'),
-                              ),
-                            ],
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                  actions: <Widget>[
-                    TextButton(
-                      key: const ValueKey<String>('close_account_sync_button'),
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('Close'),
-                    ),
-                  ],
-                );
-              },
-            );
-          },
-        );
-      },
-    );
-
-    emailController.dispose();
-    householdNameController.dispose();
-    inviteCodeController.dispose();
+  Future<String?> _pullLatestHouseholdDataForSettings() async {
+    await _reloadDataForSettings();
+    final String? syncError = AppCloudSync.instance.lastSyncError;
+    return syncError == null
+        ? 'Pulled the latest household data.'
+        : 'Pulled local data. $syncError';
   }
 
   FoodItem? _findFoodItemByName(String dishName) {
@@ -3606,18 +3277,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     _dishListScrollController.dispose();
     _groceryChecklistController.dispose();
     super.dispose();
-  }
-
-  Future<void> _openChangelog() async {
-    final bool didLaunch = await launchUrl(
-      _changelogUri,
-      mode: LaunchMode.externalApplication,
-    );
-    if (!didLaunch && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not open changelog.')),
-      );
-    }
   }
 
   @override
@@ -5280,65 +4939,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Text(isDishesTab ? widget.title : 'Groceries'),
-            const SizedBox(width: 8),
-            Tooltip(
-              message: 'Open changelog',
-              child: InkWell(
-                onTap: _openChangelog,
-                borderRadius: BorderRadius.circular(999),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surface,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Text(
-                        kAppVersionLabel,
-                        style: Theme.of(context).textTheme.labelMedium
-                            ?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(width: 4),
-                      Icon(
-                        Icons.open_in_new,
-                        size: 13,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
+        title: Text(isDishesTab ? widget.title : 'Groceries'),
         actions: <Widget>[
-          AnimatedBuilder(
-            animation: AppCloudSync.instance,
-            builder: (BuildContext context, Widget? child) {
-              final AppCloudSync cloudSync = AppCloudSync.instance;
-              return IconButton(
-                tooltip: 'Account & sync',
-                icon: Icon(
-                  !cloudSync.isConfigured
-                      ? Icons.cloud_off_outlined
-                      : cloudSync.hasActiveHousehold
-                      ? Icons.cloud_done_outlined
-                      : cloudSync.hasSession
-                      ? Icons.cloud_queue_outlined
-                      : Icons.cloud_outlined,
-                ),
-                onPressed: _showAccountAndSyncDialog,
-              );
-            },
+          IconButton(
+            key: const ValueKey<String>('open_settings_button'),
+            tooltip: 'Settings',
+            onPressed: _showAccountAndSyncDialog,
+            icon: const Icon(Icons.settings_outlined),
           ),
           if (isDishesTab) ...<Widget>[
             IconButton(
@@ -5397,6 +5004,444 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               tooltip: 'Add food item',
               child: const Icon(Icons.add),
             ),
+    );
+  }
+}
+
+class FamilySettingsPage extends StatefulWidget {
+  const FamilySettingsPage({
+    super.key,
+    this.cloudStatusSummary,
+    this.onExportJsonData,
+    this.onImportJsonData,
+    this.onPullLatestHouseholdData,
+    this.onReloadData,
+  });
+
+  static const String routeName = '/settings';
+
+  final String Function(AppCloudSync cloudSync)? cloudStatusSummary;
+  final Future<String?> Function()? onExportJsonData;
+  final Future<String?> Function()? onImportJsonData;
+  final Future<String?> Function()? onPullLatestHouseholdData;
+  final Future<void> Function()? onReloadData;
+
+  @override
+  State<FamilySettingsPage> createState() => _FamilySettingsPageState();
+}
+
+class _FamilySettingsPageState extends State<FamilySettingsPage> {
+  static final Uri _changelogUri = Uri.parse(kAppChangelogUrl);
+
+  final TextEditingController _emailController = TextEditingController(
+    text: AppCloudSync.instance.currentUserEmail ?? '',
+  );
+  final TextEditingController _householdNameController =
+      TextEditingController();
+  final TextEditingController _inviteCodeController = TextEditingController();
+
+  String? _actionMessage;
+  HouseholdInvite? _latestInvite;
+
+  AppCloudSync get _cloudSync => AppCloudSync.instance;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _householdNameController.dispose();
+    _inviteCodeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _runAction(
+    Future<String?> Function() action, {
+    String? successMessage,
+    bool reloadData = true,
+  }) async {
+    setState(() {
+      _actionMessage = null;
+    });
+    final String? result = await action();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _actionMessage =
+          result ??
+          successMessage ??
+          'Done. If you used email sign-in, open the link from your inbox on this device.';
+    });
+    if (reloadData) {
+      await widget.onReloadData?.call();
+    }
+  }
+
+  Future<void> _createInviteCode() async {
+    setState(() {
+      _actionMessage = null;
+    });
+    final HouseholdInvite? invite = await _cloudSync.createInvite();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _latestInvite = invite;
+      _actionMessage = invite == null
+          ? _cloudSync.lastSyncError ?? 'Could not create invite code.'
+          : 'Invite code ready to share.';
+    });
+  }
+
+  Future<void> _copyInviteCode() async {
+    final HouseholdInvite? latestInvite = _latestInvite;
+    if (latestInvite == null) {
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: latestInvite.code));
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Invite code copied.')));
+  }
+
+  Future<void> _openChangelog() async {
+    final bool didLaunch = await launchUrl(
+      _changelogUri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!didLaunch && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open changelog.')),
+      );
+    }
+  }
+
+  String _cloudSummary() {
+    final summary = widget.cloudStatusSummary;
+    if (summary == null) {
+      return '';
+    }
+    return summary(_cloudSync);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _cloudSync,
+      builder: (BuildContext context, Widget? child) {
+        return Scaffold(
+          appBar: AppBar(title: const Text('Settings')),
+          body: ListView(
+            padding: const EdgeInsets.all(16),
+            children: <Widget>[
+              _SettingsSection(
+                title: 'App',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.info_outline),
+                  title: const Text('App version'),
+                  subtitle: const Text(
+                    'Open the GitHub changelog for this build',
+                  ),
+                  trailing: _VersionChip(
+                    version: kAppVersionLabel,
+                    onTap: _openChangelog,
+                  ),
+                  onTap: _openChangelog,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _SettingsSection(
+                title: 'Data backup',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    if (_actionMessage != null) ...<Widget>[
+                      Text(_actionMessage!),
+                      const SizedBox(height: 12),
+                    ],
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        FilledButton.tonalIcon(
+                          key: const ValueKey<String>(
+                            'open_json_export_button',
+                          ),
+                          onPressed: widget.onExportJsonData == null
+                              ? null
+                              : () => _runAction(widget.onExportJsonData!),
+                          icon: const Icon(Icons.upload_file_outlined),
+                          label: Text(
+                            appDataFileAccess.supportsFilePickerFlow
+                                ? 'Export JSON file'
+                                : 'Export JSON',
+                          ),
+                        ),
+                        FilledButton.tonalIcon(
+                          key: const ValueKey<String>(
+                            'open_json_import_button',
+                          ),
+                          onPressed: widget.onImportJsonData == null
+                              ? null
+                              : () => _runAction(widget.onImportJsonData!),
+                          icon: const Icon(Icons.download_outlined),
+                          label: Text(
+                            appDataFileAccess.supportsFilePickerFlow
+                                ? 'Import JSON file'
+                                : 'Import JSON',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              _SettingsSection(
+                title: 'Cloud & sync',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(_cloudSummary()),
+                    if (_cloudSync.lastSyncError != null) ...<Widget>[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Latest sync error: ${_cloudSync.lastSyncError}',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    if (!_cloudSync.isConfigured)
+                      const Text(
+                        'Supabase is not configured in this build yet. You can keep using the app locally, then add cloud config later.',
+                      )
+                    else ...<Widget>[
+                      TextField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(
+                          labelText: 'Email',
+                          hintText: 'you@example.com',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      FilledButton(
+                        onPressed: _cloudSync.isSyncing
+                            ? null
+                            : () => _runAction(
+                                () => _cloudSync.signInWithEmailOtp(
+                                  _emailController.text,
+                                ),
+                                successMessage:
+                                    'Sign-in link sent. Open it from your inbox on this device.',
+                              ),
+                        child: const Text('Send sign-in link'),
+                      ),
+                      if (_cloudSync.hasSession) ...<Widget>[
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: _householdNameController,
+                          decoration: const InputDecoration(
+                            labelText: 'New household name',
+                            hintText: 'e.g. Family eating',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        FilledButton.tonal(
+                          onPressed: _cloudSync.isSyncing
+                              ? null
+                              : () => _runAction(
+                                  () => _cloudSync.createHousehold(
+                                    _householdNameController.text,
+                                  ),
+                                  successMessage:
+                                      'Household created and connected.',
+                                ),
+                          child: const Text('Create household'),
+                        ),
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: _inviteCodeController,
+                          decoration: const InputDecoration(
+                            labelText: 'Invite code',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        FilledButton.tonal(
+                          onPressed: _cloudSync.isSyncing
+                              ? null
+                              : () => _runAction(
+                                  () => _cloudSync.joinHousehold(
+                                    _inviteCodeController.text,
+                                  ),
+                                  successMessage:
+                                      'Joined household successfully.',
+                                ),
+                          child: const Text('Join household'),
+                        ),
+                        if (_cloudSync.hasActiveHousehold) ...<Widget>[
+                          const SizedBox(height: 16),
+                          FilledButton.tonalIcon(
+                            onPressed: _cloudSync.isSyncing
+                                ? null
+                                : _createInviteCode,
+                            icon: const Icon(Icons.person_add_alt_1),
+                            label: const Text('Create invite code'),
+                          ),
+                          if (_latestInvite != null) ...<Widget>[
+                            const SizedBox(height: 8),
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Text(
+                                      'Invite code',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.labelLarge,
+                                    ),
+                                    const SizedBox(height: 6),
+                                    SelectableText(
+                                      _latestInvite!.code,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.titleMedium,
+                                    ),
+                                    if (_latestInvite!.expiresAt != null)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 6),
+                                        child: Text(
+                                          'Expires ${_latestInvite!.expiresAt!.toLocal()}',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.bodySmall,
+                                        ),
+                                      ),
+                                    const SizedBox(height: 8),
+                                    FilledButton.tonalIcon(
+                                      onPressed: _copyInviteCode,
+                                      icon: const Icon(Icons.copy),
+                                      label: const Text('Copy code'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 16),
+                          FilledButton.tonalIcon(
+                            onPressed:
+                                _cloudSync.isSyncing ||
+                                    widget.onPullLatestHouseholdData == null
+                                ? null
+                                : () => _runAction(
+                                    widget.onPullLatestHouseholdData!,
+                                    reloadData: false,
+                                  ),
+                            icon: const Icon(Icons.sync),
+                            label: const Text('Pull latest household data'),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        TextButton(
+                          onPressed: _cloudSync.isSyncing
+                              ? null
+                              : () => _runAction(
+                                  _cloudSync.signOut,
+                                  successMessage: 'Signed out.',
+                                ),
+                          child: const Text('Sign out'),
+                        ),
+                      ],
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SettingsSection extends StatelessWidget {
+  const _SettingsSection({required this.title, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 12),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VersionChip extends StatelessWidget {
+  const _VersionChip({required this.version, required this.onTap});
+
+  final String version;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(
+              version,
+              style: Theme.of(
+                context,
+              ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.open_in_new,
+              size: 13,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
