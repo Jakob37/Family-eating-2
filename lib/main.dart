@@ -6,6 +6,8 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'automatic_backup_preferences.dart';
+import 'automatic_backup_service.dart';
 import 'app_version.dart';
 import 'browser_window.dart';
 import 'cloud_sync.dart';
@@ -1745,6 +1747,9 @@ class FoodDataStore {
   static const String _legacyFoodNamesKey = 'family_eating.food_names';
 
   final FoodDataMigrator _migrator = FoodDataMigrator();
+  final FoodBackupService _backupService = const FoodBackupService();
+  final FoodBackupPreferences _backupPreferences =
+      const FoodBackupPreferences();
 
   Future<FamilyEatingData> load() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -1833,7 +1838,13 @@ class FoodDataStore {
   Future<void> save(FamilyEatingData data, {bool pushRemote = true}) async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final Map<String, dynamic> payload = _payloadFromData(data);
-    await prefs.setString(_dataKey, jsonEncode(payload));
+    final String encodedPayload = jsonEncode(payload);
+    await prefs.setString(_dataKey, encodedPayload);
+    if (await _backupPreferences.loadAutomaticBackupsEnabled()) {
+      await _backupService.saveAutomaticBackup(
+        const JsonEncoder.withIndent('  ').convert(payload),
+      );
+    }
     if (pushRemote) {
       await AppCloudSync.instance.pushLatestSnapshot(payload);
     }
@@ -1870,6 +1881,37 @@ class FoodDataStore {
       ),
     );
     await save(data, pushRemote: pushRemote);
+    return data;
+  }
+
+  Future<bool> loadAutomaticBackupsEnabled() {
+    return _backupPreferences.loadAutomaticBackupsEnabled();
+  }
+
+  Future<void> saveAutomaticBackupsEnabled(bool enabled) {
+    return _backupPreferences.saveAutomaticBackupsEnabled(enabled);
+  }
+
+  Future<void> saveAutomaticBackupNow(FamilyEatingData data) {
+    return _backupService.saveAutomaticBackup(
+      exportAsJsonString(data),
+      force: true,
+    );
+  }
+
+  Future<List<FoodBackupEntry>> listAutomaticBackups() {
+    return _backupService.listBackups();
+  }
+
+  Future<FamilyEatingData> restoreAutomaticBackup(String backupId) async {
+    final String backupJson = await _backupService.readBackup(backupId);
+    final FamilyEatingData data = await importFromJsonString(
+      backupJson,
+      pushRemote: false,
+    );
+    if (await _backupPreferences.loadAutomaticBackupsEnabled()) {
+      await saveAutomaticBackupNow(data);
+    }
     return data;
   }
 
@@ -2735,6 +2777,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           cloudStatusSummary: _cloudStatusSummary,
           onExportJsonData: _exportJsonDataForSettings,
           onImportJsonData: _importJsonDataForSettings,
+          loadAutomaticBackupsEnabled: _loadAutomaticBackupsEnabledForSettings,
+          onAutomaticBackupsEnabledChanged:
+              _setAutomaticBackupsEnabledForSettings,
+          onListAutomaticBackups: _listAutomaticBackupsForSettings,
+          onRestoreAutomaticBackup: _restoreAutomaticBackupForSettings,
           onPullLatestHouseholdData: _pullLatestHouseholdDataForSettings,
           onReloadData: _reloadDataForSettings,
         ),
@@ -2787,6 +2834,36 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       return 'Could not import JSON. Check that the pasted data is valid.';
     } catch (_) {
       return 'Could not import JSON.';
+    }
+  }
+
+  Future<bool> _loadAutomaticBackupsEnabledForSettings() {
+    return _dataStore.loadAutomaticBackupsEnabled();
+  }
+
+  Future<String?> _setAutomaticBackupsEnabledForSettings(bool enabled) async {
+    await _dataStore.saveAutomaticBackupsEnabled(enabled);
+    if (enabled) {
+      await _dataStore.saveAutomaticBackupNow(_currentDataSnapshot());
+      return 'Automatic backups enabled. A fresh local snapshot was saved.';
+    }
+    return 'Automatic backups disabled.';
+  }
+
+  Future<List<FoodBackupEntry>> _listAutomaticBackupsForSettings() {
+    return _dataStore.listAutomaticBackups();
+  }
+
+  Future<String?> _restoreAutomaticBackupForSettings(String backupId) async {
+    try {
+      final FamilyEatingData restoredData = await _dataStore
+          .restoreAutomaticBackup(backupId);
+      _applyLoadedData(restoredData);
+      return 'Automatic backup restored. Current data was replaced.';
+    } on FormatException {
+      return 'Could not restore that backup.';
+    } catch (_) {
+      return 'Could not restore the selected backup.';
     }
   }
 
@@ -5014,6 +5091,10 @@ class FamilySettingsPage extends StatefulWidget {
     this.cloudStatusSummary,
     this.onExportJsonData,
     this.onImportJsonData,
+    this.loadAutomaticBackupsEnabled,
+    this.onAutomaticBackupsEnabledChanged,
+    this.onListAutomaticBackups,
+    this.onRestoreAutomaticBackup,
     this.onPullLatestHouseholdData,
     this.onReloadData,
   });
@@ -5023,6 +5104,11 @@ class FamilySettingsPage extends StatefulWidget {
   final String Function(AppCloudSync cloudSync)? cloudStatusSummary;
   final Future<String?> Function()? onExportJsonData;
   final Future<String?> Function()? onImportJsonData;
+  final Future<bool> Function()? loadAutomaticBackupsEnabled;
+  final Future<String?> Function(bool enabled)?
+  onAutomaticBackupsEnabledChanged;
+  final Future<List<FoodBackupEntry>> Function()? onListAutomaticBackups;
+  final Future<String?> Function(String backupId)? onRestoreAutomaticBackup;
   final Future<String?> Function()? onPullLatestHouseholdData;
   final Future<void> Function()? onReloadData;
 
@@ -5042,8 +5128,16 @@ class _FamilySettingsPageState extends State<FamilySettingsPage> {
 
   String? _actionMessage;
   HouseholdInvite? _latestInvite;
+  bool _automaticBackupsEnabled = false;
+  bool _isLoadingAutomaticBackupsPreference = false;
 
   AppCloudSync get _cloudSync => AppCloudSync.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAutomaticBackupPreference();
+  }
 
   @override
   void dispose() {
@@ -5051,6 +5145,25 @@ class _FamilySettingsPageState extends State<FamilySettingsPage> {
     _householdNameController.dispose();
     _inviteCodeController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadAutomaticBackupPreference() async {
+    final loader = widget.loadAutomaticBackupsEnabled;
+    if (loader == null) {
+      return;
+    }
+
+    setState(() {
+      _isLoadingAutomaticBackupsPreference = true;
+    });
+    final bool enabled = await loader();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _automaticBackupsEnabled = enabled;
+      _isLoadingAutomaticBackupsPreference = false;
+    });
   }
 
   Future<void> _runAction(
@@ -5116,6 +5229,138 @@ class _FamilySettingsPageState extends State<FamilySettingsPage> {
         const SnackBar(content: Text('Could not open changelog.')),
       );
     }
+  }
+
+  String _backupTimeLabel(BuildContext context, DateTime savedAt) {
+    final MaterialLocalizations localizations = MaterialLocalizations.of(
+      context,
+    );
+    return '${localizations.formatFullDate(savedAt)} at '
+        '${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(savedAt))}';
+  }
+
+  Future<void> _toggleAutomaticBackups(bool enabled) async {
+    final onChanged = widget.onAutomaticBackupsEnabledChanged;
+    if (onChanged == null) {
+      return;
+    }
+
+    setState(() {
+      _actionMessage = null;
+      _automaticBackupsEnabled = enabled;
+    });
+
+    final String? result = await onChanged(enabled);
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _actionMessage =
+          result ??
+          (enabled
+              ? 'Automatic backups enabled.'
+              : 'Automatic backups disabled.');
+    });
+  }
+
+  Future<bool> _confirmAutomaticBackupRestore(FoodBackupEntry backup) async {
+    final bool? shouldRestore = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('Restore backup'),
+          content: Text(
+            'Restore "${backup.fileName}"? This replaces the current local data.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Restore'),
+            ),
+          ],
+        );
+      },
+    );
+    return shouldRestore ?? false;
+  }
+
+  Future<void> _restoreAutomaticBackup() async {
+    final listBackups = widget.onListAutomaticBackups;
+    final restoreBackup = widget.onRestoreAutomaticBackup;
+    if (listBackups == null || restoreBackup == null) {
+      return;
+    }
+
+    final List<FoodBackupEntry> backups = await listBackups();
+    if (!mounted) {
+      return;
+    }
+
+    if (backups.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No automatic backups are available yet.'),
+        ),
+      );
+      return;
+    }
+
+    final FoodBackupEntry? selectedBackup =
+        await showModalBottomSheet<FoodBackupEntry>(
+          context: context,
+          builder: (BuildContext bottomSheetContext) {
+            return SafeArea(
+              child: ListView(
+                shrinkWrap: true,
+                children: <Widget>[
+                  const ListTile(
+                    title: Text(
+                      'Restore Automatic Backup',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: Text('Choose a recent local JSON snapshot'),
+                  ),
+                  const Divider(height: 1),
+                  for (final FoodBackupEntry backup in backups)
+                    ListTile(
+                      leading: const Icon(Icons.history_outlined),
+                      title: Text(
+                        _backupTimeLabel(bottomSheetContext, backup.savedAt),
+                      ),
+                      subtitle: Text(backup.fileName),
+                      onTap: () => Navigator.of(bottomSheetContext).pop(backup),
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+
+    if (!mounted || selectedBackup == null) {
+      return;
+    }
+
+    final bool shouldRestore = await _confirmAutomaticBackupRestore(
+      selectedBackup,
+    );
+    if (!mounted || !shouldRestore) {
+      return;
+    }
+
+    final String? result = await restoreBackup(selectedBackup.id);
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _actionMessage =
+          result ?? 'Automatic backup restored. Current data was replaced.';
+    });
   }
 
   String _cloudSummary() {
@@ -5195,6 +5440,37 @@ class _FamilySettingsPageState extends State<FamilySettingsPage> {
                           ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 16),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: const Icon(Icons.backup_outlined),
+                      title: const Text('Automatic JSON backups'),
+                      subtitle: const Text(
+                        'Keep up to 20 recent local snapshots and update them automatically',
+                      ),
+                      value: _automaticBackupsEnabled,
+                      onChanged:
+                          widget.onAutomaticBackupsEnabledChanged == null ||
+                              _isLoadingAutomaticBackupsPreference
+                          ? null
+                          : _toggleAutomaticBackups,
+                    ),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.restore_outlined),
+                      title: const Text('Restore from automatic backup'),
+                      subtitle: const Text(
+                        'Choose one of the recent local snapshots and replace current data',
+                      ),
+                      enabled:
+                          widget.onListAutomaticBackups != null &&
+                          widget.onRestoreAutomaticBackup != null,
+                      onTap:
+                          widget.onListAutomaticBackups == null ||
+                              widget.onRestoreAutomaticBackup == null
+                          ? null
+                          : _restoreAutomaticBackup,
                     ),
                   ],
                 ),
