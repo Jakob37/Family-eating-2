@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import 'app_version.dart';
 import 'browser_window.dart';
 import 'cloud_sync.dart';
 import 'data_file_access.dart';
@@ -1981,6 +1983,7 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
+  static final Uri _changelogUri = Uri.parse(kAppChangelogUrl);
   final FoodDataStore _dataStore = FoodDataStore();
   final TextEditingController _dishSearchController = TextEditingController();
   final TextEditingController _groceryChecklistController =
@@ -3603,6 +3606,18 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     _dishListScrollController.dispose();
     _groceryChecklistController.dispose();
     super.dispose();
+  }
+
+  Future<void> _openChangelog() async {
+    final bool didLaunch = await launchUrl(
+      _changelogUri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!didLaunch && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open changelog.')),
+      );
+    }
   }
 
   @override
@@ -5265,7 +5280,36 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Text(isDishesTab ? widget.title : 'Groceries'),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(isDishesTab ? widget.title : 'Groceries'),
+            const SizedBox(width: 8),
+            Tooltip(
+              message: 'Open changelog',
+              child: InkWell(
+                onTap: _openChangelog,
+                borderRadius: BorderRadius.circular(999),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    kAppVersionLabel,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
         actions: <Widget>[
           AnimatedBuilder(
             animation: AppCloudSync.instance,
