@@ -2,13 +2,17 @@
 
 All notable user-facing changes to this project should be recorded here.
 
-## v1.3.1
+## v1.3.3
 
-- Added mobile Supabase deep-link app configuration for iOS and Android and documented a shorter `--dart-define-from-file` setup flow for local Supabase-enabled builds.
+- Split the largest storage and settings sections out of `main.dart` so future work can evolve the app shell and data layer without one giant edit surface.
 
 ## v1.3.2
 
 - Added a desktop-focused Supabase setup checklist in `docs/` so the full project, auth, SQL, and local run configuration flow is easy to resume outside mobile.
+
+## v1.3.1
+
+- Added mobile Supabase deep-link app configuration for iOS and Android and documented a shorter `--dart-define-from-file` setup flow for local Supabase-enabled builds.
 
 ## v1.3.0
 

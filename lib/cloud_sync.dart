@@ -28,10 +28,7 @@ class HouseholdSummary {
 }
 
 class HouseholdInvite {
-  const HouseholdInvite({
-    required this.code,
-    this.expiresAt,
-  });
+  const HouseholdInvite({required this.code, this.expiresAt});
 
   final String code;
   final DateTime? expiresAt;
@@ -402,7 +399,9 @@ class AppCloudSync extends ChangeNotifier {
         return null;
       }
 
-      final int version = row['version'] is num ? (row['version'] as num).toInt() : 0;
+      final int version = row['version'] is num
+          ? (row['version'] as num).toInt()
+          : 0;
       _activeSnapshotVersion = version;
 
       final dynamic rawJson = row['data_json'];
