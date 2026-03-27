@@ -28,6 +28,8 @@ Recommended redirect URL used by the current Flutter code:
 io.supabase.familyeating://login-callback/
 ```
 
+This repository now includes the mobile deep-link app config for that scheme on iOS and Android.
+
 For web builds, also add your local/dev URL, for example:
 
 ```text
@@ -226,6 +228,22 @@ flutter run \
 ```
 
 Without these defines, the app stays in local-only mode.
+
+If long commands are annoying, put the values in a local JSON file that is not committed, for example `supabase.dev.json`:
+
+```json
+{
+  "SUPABASE_URL": "https://YOUR_PROJECT_ID.supabase.co",
+  "SUPABASE_PUBLISHABLE_KEY": "YOUR_PUBLISHABLE_KEY",
+  "SUPABASE_REDIRECT_URL": "io.supabase.familyeating://login-callback/"
+}
+```
+
+Then run:
+
+```bash
+flutter run --dart-define-from-file=supabase.dev.json
+```
 
 ## 8. Use the in-app flow
 
