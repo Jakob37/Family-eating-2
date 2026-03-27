@@ -2,6 +2,10 @@
 
 All notable user-facing changes to this project should be recorded here.
 
+## v1.3.4
+
+- Moved the full grocery trip workflow into its own file so the main family app shell and the grocery-planning flow can evolve independently.
+
 ## v1.3.3
 
 - Split the largest storage and settings sections out of `main.dart` so future work can evolve the app shell and data layer without one giant edit surface.
