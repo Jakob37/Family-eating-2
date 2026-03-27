@@ -6,6 +6,10 @@ All notable user-facing changes to this project should be recorded here.
 
 - Added mobile Supabase deep-link app configuration for iOS and Android and documented a shorter `--dart-define-from-file` setup flow for local Supabase-enabled builds.
 
+## v1.3.2
+
+- Added a desktop-focused Supabase setup checklist in `docs/` so the full project, auth, SQL, and local run configuration flow is easy to resume outside mobile.
+
 ## v1.3.0
 
 - Added `mind`-style automatic local JSON backups with a settings toggle, recent snapshot retention, and restore-from-backup support alongside the existing manual import/export tools.
