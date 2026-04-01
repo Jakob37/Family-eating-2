@@ -2,6 +2,10 @@
 
 All notable user-facing changes to this project should be recorded here.
 
+## v1.4.5
+
+- Added a week-plan action to copy last week's dishes into the current week, with overwrite confirmation when this week already has a plan.
+
 ## v1.4.4
 
 - Updated grocery trip dish cards to show the same core dish info as the main dishes view, with ingredients and portion controls moved into the expanded card content.

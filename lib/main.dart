@@ -2621,6 +2621,72 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     await _persistData();
   }
 
+  Future<void> _copyPreviousWeekToCurrentWeek() async {
+    final String currentWeekStart = _currentWeekStartKey();
+    final String previousWeekStart = _shiftWeekStartKey(currentWeekStart, -1);
+    final WeekPlan? previousWeekPlan = _weekPlanForStart(previousWeekStart);
+
+    if (previousWeekPlan == null || previousWeekPlan.entries.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No previous week plan to copy.')),
+      );
+      return;
+    }
+
+    final WeekPlan? currentWeekPlan = _weekPlanForStart(currentWeekStart);
+    final bool shouldOverwrite =
+        currentWeekPlan == null ||
+        currentWeekPlan.entries.isEmpty ||
+        await showDialog<bool>(
+              context: context,
+              builder: (BuildContext dialogContext) {
+                return AlertDialog(
+                  title: const Text('Replace this week plan?'),
+                  content: const Text(
+                    'This week already has dishes. Replace them with last week\'s plan?',
+                  ),
+                  actions: <Widget>[
+                    TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(false),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(true),
+                      child: const Text('Replace'),
+                    ),
+                  ],
+                );
+              },
+            ) ==
+            true;
+
+    if (!shouldOverwrite) {
+      return;
+    }
+
+    setState(() {
+      _upsertWeekPlan(
+        WeekPlan(
+          weekStart: currentWeekStart,
+          entries: previousWeekPlan.entries.map((WeekPlanEntry entry) {
+            return entry.copyWith(isCooked: false);
+          }).toList(growable: false),
+        ),
+      );
+      _selectedWeekStart = currentWeekStart;
+    });
+    await _persistData();
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Copied last week into This week.')),
+    );
+  }
+
   Future<void> _addDishToCurrentWeekPlan(FoodItem item) async {
     final String currentWeekStart = _currentWeekStartKey();
     final WeekPlan? existingPlan = _weekPlanForStart(currentWeekStart);
@@ -3896,6 +3962,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   Widget _buildWeekPlanCard() {
     final WeekPlan? weekPlan = _selectedWeekPlan;
     final bool isCurrentWeek = _selectedWeekStart == _currentWeekStartKey();
+    final bool hasPreviousWeekPlan =
+        _weekPlanForStart(_shiftWeekStartKey(_currentWeekStartKey(), -1))
+            ?.entries
+            .isNotEmpty ??
+        false;
     final int plannedCount = weekPlan?.entries.length ?? 0;
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
@@ -4120,6 +4191,24 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                             ),
                           ),
                         ),
+                        if (isCurrentWeek && hasPreviousWeekPlan)
+                          Tooltip(
+                            message: 'Copy previous week to this week',
+                            child: OutlinedButton(
+                              onPressed: _copyPreviousWeekToCurrentWeek,
+                              style: OutlinedButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                tapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                                minimumSize: const Size(36, 36),
+                                padding: EdgeInsets.zero,
+                              ),
+                              child: const FaIcon(
+                                FontAwesomeIcons.clockRotateLeft,
+                                size: 16,
+                              ),
+                            ),
+                          ),
                         Tooltip(
                           message: 'Clear week plan',
                           child: OutlinedButton(
