@@ -2,6 +2,11 @@
 
 All notable user-facing changes to this project should be recorded here.
 
+## v1.4.0
+
+- Added a third `Expiry` tab for tracking household food items with storage location, notes, quantity labels, and expiry dates.
+- Added per-item reminder scheduling at fixed times before expiry and wired local notification scheduling for supported mobile/desktop platforms.
+
 ## v1.3.5
 
 - Week plan dishes now open the same cooking log popup as the dish list when marked done, and they only save as cooked after that dialog is completed.

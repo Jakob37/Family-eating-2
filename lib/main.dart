@@ -1,9 +1,14 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:timezone/data/latest_all.dart' as tzdata;
+import 'package:timezone/timezone.dart' as tz;
 import 'package:url_launcher/url_launcher.dart';
 
 import 'automatic_backup_preferences.dart';
@@ -15,11 +20,14 @@ import 'data_file_access.dart';
 part 'food_data_store.dart';
 part 'family_settings_page.dart';
 part 'grocery_trip_page.dart';
+part 'inventory_page.dart';
+part 'notification_service.dart';
 
 DataFileAccess appDataFileAccess = createDataFileAccess();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await AppNotificationScheduler.instance.initialize();
   await AppCloudSync.instance.initialize();
   runApp(const MyApp());
 }
@@ -76,12 +84,14 @@ class FamilyEatingData {
     this.routineItems = const <RoutineFoodItem>[],
     this.weekPlans = const <WeekPlan>[],
     this.groceryChecklistItems = const <GroceryChecklistItem>[],
+    this.inventoryItems = const <InventoryItem>[],
   });
 
   final List<FoodItem> foodItems;
   final List<RoutineFoodItem> routineItems;
   final List<WeekPlan> weekPlans;
   final List<GroceryChecklistItem> groceryChecklistItems;
+  final List<InventoryItem> inventoryItems;
 }
 
 class FoodItem {
@@ -1385,6 +1395,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   final List<RoutineFoodItem> _routineItems = <RoutineFoodItem>[];
   final List<GroceryChecklistItem> _groceryChecklistItems =
       <GroceryChecklistItem>[];
+  final List<InventoryItem> _inventoryItems = <InventoryItem>[];
   final Set<String> _expandedDishNames = <String>{};
   final List<WeekPlan> _weekPlans = <WeekPlan>[];
   final ScrollController _dishListScrollController = ScrollController();
@@ -1930,6 +1941,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       groceryChecklistItems: List<GroceryChecklistItem>.from(
         _groceryChecklistItems,
       ),
+      inventoryItems: List<InventoryItem>.from(_inventoryItems),
     );
   }
 
@@ -2767,10 +2779,14 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       _groceryChecklistItems
         ..clear()
         ..addAll(data.groceryChecklistItems);
+      _inventoryItems
+        ..clear()
+        ..addAll(data.inventoryItems);
       _weekPlans
         ..clear()
         ..addAll(data.weekPlans);
       _sortFoodItemsByRanking();
+      _sortInventoryItems();
       _isLoading = false;
       _loadError = null;
     });
@@ -2784,6 +2800,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           routineItems: _routineItems,
           weekPlans: _weekPlans,
           groceryChecklistItems: _groceryChecklistItems,
+          inventoryItems: _inventoryItems,
         ),
       );
       if (!mounted) {
@@ -4380,14 +4397,21 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final bool isDishesTab = _selectedTabIndex == 0;
-    final Widget body = isDishesTab
-        ? _buildDishesBody()
-        : _buildGroceriesBody();
+    final Widget body = switch (_selectedTabIndex) {
+      0 => _buildDishesBody(),
+      1 => _buildGroceriesBody(),
+      _ => _buildInventoryBody(),
+    };
+    final String pageTitle = switch (_selectedTabIndex) {
+      0 => widget.title,
+      1 => 'Groceries',
+      _ => 'Expiry',
+    };
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Text(isDishesTab ? widget.title : 'Groceries'),
+        title: Text(pageTitle),
         actions: <Widget>[
           IconButton(
             key: const ValueKey<String>('open_settings_button'),
@@ -4443,15 +4467,28 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             selectedIcon: Icon(Icons.checklist),
             label: 'Groceries',
           ),
+          NavigationDestination(
+            icon: Icon(Icons.kitchen_outlined),
+            selectedIcon: Icon(Icons.kitchen),
+            label: 'Expiry',
+          ),
         ],
       ),
-      floatingActionButton: !isDishesTab || _isLoading || _loadError != null
+      floatingActionButton: _isLoading || _loadError != null
           ? null
-          : FloatingActionButton(
-              onPressed: _addFoodItem,
-              tooltip: 'Add food item',
-              child: const Icon(Icons.add),
-            ),
+          : switch (_selectedTabIndex) {
+              0 => FloatingActionButton(
+                  onPressed: _addFoodItem,
+                  tooltip: 'Add dish',
+                  child: const Icon(Icons.add),
+                ),
+              2 => FloatingActionButton(
+                  onPressed: _addInventoryItem,
+                  tooltip: 'Add expiry item',
+                  child: const Icon(Icons.add),
+                ),
+              _ => null,
+            },
     );
   }
 }

@@ -1,7 +1,7 @@
 part of 'main.dart';
 
 class FoodDataMigrator {
-  static const int currentVersion = 11;
+  static const int currentVersion = 12;
 
   Map<String, dynamic> migrate(Map<String, dynamic> source) {
     int version = _readVersion(source);
@@ -44,6 +44,9 @@ class FoodDataMigrator {
         case 10:
           working = _migrateV10ToV11(working);
           version = 11;
+        case 11:
+          working = _migrateV11ToV12(working);
+          version = 12;
         default:
           throw FormatException(
             'No migration registered from version $version.',
@@ -370,6 +373,18 @@ class FoodDataMigrator {
     };
   }
 
+  Map<String, dynamic> _migrateV11ToV12(Map<String, dynamic> source) {
+    return <String, dynamic>{
+      ...source,
+      'schemaVersion': 12,
+      'foodItems': source['foodItems'] ?? <dynamic>[],
+      'routineItems': source['routineItems'] ?? <dynamic>[],
+      'weekPlans': source['weekPlans'] ?? <dynamic>[],
+      'groceryChecklistItems': source['groceryChecklistItems'] ?? <dynamic>[],
+      'inventoryItems': source['inventoryItems'] ?? <dynamic>[],
+    };
+  }
+
   int _parseCookedCount(dynamic rawValue) {
     final int value = rawValue is num
         ? rawValue.toInt()
@@ -436,6 +451,7 @@ class FoodDataStore {
       groceryChecklistItems: _decodeGroceryChecklistItems(
         migrated['groceryChecklistItems'],
       ),
+      inventoryItems: _decodeInventoryItems(migrated['inventoryItems']),
     );
 
     final CloudSnapshot? remoteSnapshot = await AppCloudSync.instance
@@ -454,6 +470,9 @@ class FoodDataStore {
           groceryChecklistItems: _decodeGroceryChecklistItems(
             remoteMigrated['groceryChecklistItems'],
           ),
+          inventoryItems: _decodeInventoryItems(
+            remoteMigrated['inventoryItems'],
+          ),
         );
         await save(remoteData, pushRemote: false);
         await prefs.remove(_legacyFoodNamesKey);
@@ -468,6 +487,9 @@ class FoodDataStore {
       await prefs.remove(_legacyFoodNamesKey);
     }
 
+    await AppNotificationScheduler.instance.syncInventoryNotifications(
+      data.inventoryItems,
+    );
     return data;
   }
 
@@ -484,6 +506,9 @@ class FoodDataStore {
     if (pushRemote) {
       await AppCloudSync.instance.pushLatestSnapshot(payload);
     }
+    await AppNotificationScheduler.instance.syncInventoryNotifications(
+      data.inventoryItems,
+    );
   }
 
   String exportAsJsonString(FamilyEatingData data) {
@@ -515,6 +540,7 @@ class FoodDataStore {
       groceryChecklistItems: _decodeGroceryChecklistItems(
         migrated['groceryChecklistItems'],
       ),
+      inventoryItems: _decodeInventoryItems(migrated['inventoryItems']),
     );
     await save(data, pushRemote: pushRemote);
     return data;
@@ -571,6 +597,9 @@ class FoodDataStore {
       'groceryChecklistItems': data.groceryChecklistItems
           .map((GroceryChecklistItem item) => item.toJson())
           .toList(),
+      'inventoryItems': data.inventoryItems
+          .map((InventoryItem item) => item.toJson())
+          .toList(),
     };
   }
 
@@ -616,6 +645,19 @@ class FoodDataStore {
               RoutineFoodItem.fromJson(Map<String, dynamic>.from(item)),
         )
         .where((RoutineFoodItem item) => item.ingredient.name.trim().isNotEmpty)
+        .toList(growable: false);
+  }
+
+  List<InventoryItem> _decodeInventoryItems(dynamic rawItems) {
+    if (rawItems is! List) {
+      return <InventoryItem>[];
+    }
+    return rawItems
+        .whereType<Map>()
+        .map(
+          (Map item) => InventoryItem.fromJson(Map<String, dynamic>.from(item)),
+        )
+        .where((InventoryItem item) => item.name.trim().isNotEmpty)
         .toList(growable: false);
   }
 

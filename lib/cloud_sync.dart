@@ -200,10 +200,12 @@ class AppCloudSync extends ChangeNotifier {
       await client.from('household_snapshots').upsert(<String, dynamic>{
         'household_id': householdId,
         'data_json': <String, dynamic>{
-          'schemaVersion': 10,
+          'schemaVersion': 12,
           'foodItems': <dynamic>[],
           'routineItems': <dynamic>[],
           'weekPlans': <dynamic>[],
+          'groceryChecklistItems': <dynamic>[],
+          'inventoryItems': <dynamic>[],
         },
         'version': 1,
         'updated_at': DateTime.now().toUtc().toIso8601String(),

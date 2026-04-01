@@ -23,6 +23,7 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
   final List<RoutineFoodItem> _routineItems = <RoutineFoodItem>[];
   final List<GroceryChecklistItem> _groceryChecklistItems =
       <GroceryChecklistItem>[];
+  final List<InventoryItem> _inventoryItems = <InventoryItem>[];
   final Map<String, GroceryTripDishSelection> _selectedDishes =
       <String, GroceryTripDishSelection>{};
   final Set<String> _selectedRoutineItemIds = <String>{};
@@ -75,6 +76,9 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
         _groceryChecklistItems
           ..clear()
           ..addAll(data.groceryChecklistItems);
+        _inventoryItems
+          ..clear()
+          ..addAll(data.inventoryItems);
         _weekPlans
           ..clear()
           ..addAll(data.weekPlans);
@@ -106,6 +110,7 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
           routineItems: _routineItems,
           weekPlans: _weekPlans,
           groceryChecklistItems: _groceryChecklistItems,
+          inventoryItems: _inventoryItems,
         ),
       );
       if (!mounted) {
