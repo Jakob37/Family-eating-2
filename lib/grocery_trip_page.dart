@@ -1,5 +1,16 @@
 part of 'main.dart';
 
+enum GroceryTripDishSort {
+  alpha('A-Z'),
+  rating('Rating'),
+  duration('Cook time'),
+  cooked('Most cooked');
+
+  const GroceryTripDishSort(this.label);
+
+  final String label;
+}
+
 class GroceryTripPage extends StatefulWidget {
   const GroceryTripPage({
     super.key,
@@ -19,6 +30,7 @@ class GroceryTripPage extends StatefulWidget {
 
 class _GroceryTripPageState extends State<GroceryTripPage> {
   final FoodDataStore _dataStore = FoodDataStore();
+  final TextEditingController _dishSearchController = TextEditingController();
   final List<FoodItem> _foodItems = <FoodItem>[];
   final List<RoutineFoodItem> _routineItems = <RoutineFoodItem>[];
   final List<GroceryChecklistItem> _groceryChecklistItems =
@@ -33,7 +45,11 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
 
   bool _isLoading = true;
   bool _isSummaryCollapsed = false;
+  bool _isDishSearchVisible = false;
   String? _loadError;
+  String _dishSearchQuery = '';
+  DishFilter _activeFilter = DishFilter.empty;
+  GroceryTripDishSort _sortMode = GroceryTripDishSort.alpha;
 
   @override
   void initState() {
@@ -43,6 +59,7 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
 
   @override
   void dispose() {
+    _dishSearchController.dispose();
     for (final TextEditingController controller in _portionControllers.values) {
       controller.dispose();
     }
@@ -180,6 +197,425 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
 
   bool _isRoutineSelected(RoutineFoodItem item) {
     return _selectedRoutineItemIds.contains(item.id);
+  }
+
+  bool get _hasActiveDishSearch => _dishSearchQuery.trim().isNotEmpty;
+
+  void _setDishSearchQuery(String value) {
+    setState(() {
+      _dishSearchQuery = value;
+    });
+  }
+
+  void _clearDishSearch() {
+    _dishSearchController.clear();
+    _setDishSearchQuery('');
+  }
+
+  bool _matchesDishSearch(FoodItem item) {
+    final String query = _dishSearchQuery.trim().toLowerCase();
+    if (query.isEmpty) {
+      return true;
+    }
+    if (item.name.toLowerCase().contains(query)) {
+      return true;
+    }
+    return item.ingredients.any(
+      (IngredientEntry entry) =>
+          entry.displayLabel.toLowerCase().contains(query),
+    );
+  }
+
+  bool _matchesFilter(FoodItem item, DishFilter filter) {
+    if (filter.selectedCategories.isNotEmpty &&
+        !filter.selectedCategories.contains(item.category)) {
+      return false;
+    }
+    if (filter.selectedProteins.isNotEmpty) {
+      final bool hasProteinMatch = item.proteins.any(
+        filter.selectedProteins.contains,
+      );
+      if (!hasProteinMatch) {
+        return false;
+      }
+    }
+    if (filter.minRating > 0) {
+      final double? averageRating = item.averageRating;
+      if (averageRating == null || averageRating < filter.minRating) {
+        return false;
+      }
+    }
+    if (filter.minCookingTimeMinutes != null) {
+      final double? averageDuration = item.averageDurationMinutes;
+      if (averageDuration == null ||
+          averageDuration < filter.minCookingTimeMinutes!) {
+        return false;
+      }
+    }
+    if (filter.maxCookingTimeMinutes != null) {
+      final double? averageDuration = item.averageDurationMinutes;
+      if (averageDuration == null ||
+          averageDuration > filter.maxCookingTimeMinutes!) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  int _searchMatchScore(FoodItem item, String normalizedQuery) {
+    final String normalizedName = item.name.toLowerCase();
+    if (normalizedName.startsWith(normalizedQuery)) {
+      return 0;
+    }
+    if (normalizedName
+        .split(RegExp(r'\s+'))
+        .any((String part) => part.startsWith(normalizedQuery))) {
+      return 1;
+    }
+    return 2;
+  }
+
+  int _compareBySortMode(FoodItem a, FoodItem b) {
+    switch (_sortMode) {
+      case GroceryTripDishSort.alpha:
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      case GroceryTripDishSort.rating:
+        final int ratingCompare = (b.averageRating ?? -1).compareTo(
+          a.averageRating ?? -1,
+        );
+        if (ratingCompare != 0) {
+          return ratingCompare;
+        }
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      case GroceryTripDishSort.duration:
+        final int durationCompare = (a.averageDurationMinutes ?? 1 << 30)
+            .compareTo(b.averageDurationMinutes ?? 1 << 30);
+        if (durationCompare != 0) {
+          return durationCompare;
+        }
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      case GroceryTripDishSort.cooked:
+        final int cookedCompare = b.cookedCount.compareTo(a.cookedCount);
+        if (cookedCompare != 0) {
+          return cookedCompare;
+        }
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    }
+  }
+
+  List<FoodItem> _visibleFoodItems() {
+    final String normalizedQuery = _dishSearchQuery.trim().toLowerCase();
+    final List<FoodItem> items = _foodItems
+        .where((FoodItem item) => _matchesFilter(item, _activeFilter))
+        .where(_matchesDishSearch)
+        .toList(growable: false);
+    items.sort((FoodItem a, FoodItem b) {
+      if (normalizedQuery.isNotEmpty) {
+        final int scoreCompare = _searchMatchScore(
+          a,
+          normalizedQuery,
+        ).compareTo(_searchMatchScore(b, normalizedQuery));
+        if (scoreCompare != 0) {
+          return scoreCompare;
+        }
+      }
+      return _compareBySortMode(a, b);
+    });
+    return items;
+  }
+
+  Future<void> _openFilterMenu() async {
+    final DishFilter? nextFilter = await _showDishFilterDialog(
+      initialFilter: _activeFilter,
+    );
+    if (nextFilter == null || !mounted) {
+      return;
+    }
+    setState(() {
+      _activeFilter = nextFilter;
+    });
+  }
+
+  void _openSortMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: GroceryTripDishSort.values.map((GroceryTripDishSort mode) {
+              final bool selected = mode == _sortMode;
+              return ListTile(
+                title: Text(mode.label),
+                trailing: selected ? const Icon(Icons.check) : null,
+                selected: selected,
+                onTap: () {
+                  setState(() {
+                    _sortMode = mode;
+                  });
+                  Navigator.of(context).pop();
+                },
+              );
+            }).toList(growable: false),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<DishFilter?> _showDishFilterDialog({
+    required DishFilter initialFilter,
+  }) async {
+    Set<FoodCategory> selectedCategories = Set<FoodCategory>.from(
+      initialFilter.selectedCategories,
+    );
+    Set<ProteinType> selectedProteins = Set<ProteinType>.from(
+      initialFilter.selectedProteins,
+    );
+    double minRating = initialFilter.minRating;
+    String minTimeInput = initialFilter.minCookingTimeMinutes?.toString() ?? '';
+    String maxTimeInput = initialFilter.maxCookingTimeMinutes?.toString() ?? '';
+    String? minTimeError;
+    String? maxTimeError;
+
+    return showDialog<DishFilter>(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setDialogState) {
+            return AlertDialog(
+              title: const Text('Filter grocery trip dishes'),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        'Categories',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: FoodCategory.values.map((FoodCategory category) {
+                          final bool isSelected = selectedCategories.contains(
+                            category,
+                          );
+                          return FilterChip(
+                            label: Text(category.label),
+                            selected: isSelected,
+                            onSelected: (bool value) {
+                              setDialogState(() {
+                                if (value) {
+                                  selectedCategories.add(category);
+                                } else {
+                                  selectedCategories.remove(category);
+                                }
+                              });
+                            },
+                          );
+                        }).toList(growable: false),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Proteins',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: ProteinType.values.map((ProteinType protein) {
+                          final bool isSelected = selectedProteins.contains(
+                            protein,
+                          );
+                          return FilterChip(
+                            label: Text(protein.label),
+                            selected: isSelected,
+                            onSelected: (bool value) {
+                              setDialogState(() {
+                                if (value) {
+                                  selectedProteins.add(protein);
+                                } else {
+                                  selectedProteins.remove(protein);
+                                }
+                              });
+                            },
+                          );
+                        }).toList(growable: false),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Minimum rating',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      Slider(
+                        value: minRating,
+                        min: 0,
+                        max: 5,
+                        divisions: 50,
+                        label: minRating == 0
+                            ? 'No minimum'
+                            : minRating.toStringAsFixed(1),
+                        onChanged: (double value) {
+                          setDialogState(() {
+                            minRating = (value * 10).round() / 10;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        initialValue: minTimeInput,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'Minimum avg time (minutes)',
+                          errorText: minTimeError,
+                        ),
+                        onChanged: (String value) {
+                          minTimeInput = value;
+                          if (minTimeError != null) {
+                            setDialogState(() {
+                              minTimeError = null;
+                            });
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        initialValue: maxTimeInput,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'Maximum avg time (minutes)',
+                          errorText: maxTimeError,
+                        ),
+                        onChanged: (String value) {
+                          maxTimeInput = value;
+                          if (maxTimeError != null) {
+                            setDialogState(() {
+                              maxTimeError = null;
+                            });
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(DishFilter.empty),
+                  child: const Text('Clear'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final int? minMinutes = _parseOptionalMinutes(minTimeInput);
+                    final int? maxMinutes = _parseOptionalMinutes(maxTimeInput);
+                    setDialogState(() {
+                      minTimeError =
+                          minTimeInput.trim().isEmpty || minMinutes != null
+                          ? null
+                          : 'Enter 0 or more';
+                      maxTimeError =
+                          maxTimeInput.trim().isEmpty || maxMinutes != null
+                          ? null
+                          : 'Enter 0 or more';
+                      if (minMinutes != null &&
+                          maxMinutes != null &&
+                          minMinutes > maxMinutes) {
+                        maxTimeError = 'Must be >= minimum';
+                      }
+                    });
+                    if (minTimeError != null || maxTimeError != null) {
+                      return;
+                    }
+                    Navigator.of(context).pop(
+                      DishFilter(
+                        selectedCategories: Set<FoodCategory>.from(
+                          selectedCategories,
+                        ),
+                        selectedProteins: Set<ProteinType>.from(
+                          selectedProteins,
+                        ),
+                        minRating: minRating,
+                        minCookingTimeMinutes: minMinutes,
+                        maxCookingTimeMinutes: maxMinutes,
+                      ),
+                    );
+                  },
+                  child: const Text('Apply'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  int? _parseOptionalMinutes(String value) {
+    final String normalized = value.trim();
+    if (normalized.isEmpty) {
+      return null;
+    }
+    final int? parsed = int.tryParse(normalized);
+    if (parsed == null || parsed < 0) {
+      return null;
+    }
+    return parsed;
+  }
+
+  Widget _buildDishSearchBar() {
+    final bool showSearch = _isDishSearchVisible || _hasActiveDishSearch;
+    final int matchCount = _visibleFoodItems().length;
+    final String normalizedQuery = _dishSearchQuery.trim();
+    final String summary = normalizedQuery.isEmpty
+        ? '$matchCount dishes'
+        : matchCount == 1
+        ? '1 match'
+        : '$matchCount matches';
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      child: !showSearch
+          ? const SizedBox.shrink()
+          : Padding(
+              key: const ValueKey<String>('grocery_dish_search_container'),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  TextField(
+                    key: const ValueKey<String>('grocery_dish_search_field'),
+                    controller: _dishSearchController,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      hintText: 'Search grocery trip dishes',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _hasActiveDishSearch
+                          ? IconButton(
+                              tooltip: 'Clear search',
+                              onPressed: _clearDishSearch,
+                              icon: const Icon(Icons.close),
+                            )
+                          : null,
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    textInputAction: TextInputAction.search,
+                    onChanged: _setDishSearchQuery,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(summary, style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+    );
   }
 
   TextEditingController _controllerFor(FoodItem item) {
@@ -932,15 +1368,36 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
     } else {
       final List<GroceryTripDishSelection> selections = _currentSelections();
       final List<GroceryListItem> groceryItems = _buildGroceryListItems();
+      final List<FoodItem> visibleFoodItems = _visibleFoodItems();
 
       body = Column(
         children: <Widget>[
           _buildSummaryCard(selections: selections, groceryItems: groceryItems),
+          _buildDishSearchBar(),
+          if (_activeFilter.hasActiveFilters)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  ..._buildActiveFilterChipsFrom(_activeFilter),
+                  ActionChip(
+                    label: const Text('Clear'),
+                    onPressed: () {
+                      setState(() {
+                        _activeFilter = DishFilter.empty;
+                      });
+                    },
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: ListView.builder(
-              itemCount: _foodItems.length,
+              itemCount: visibleFoodItems.length,
               itemBuilder: (BuildContext context, int index) {
-                final FoodItem item = _foodItems[index];
+                final FoodItem item = visibleFoodItems[index];
                 final bool selected = _isSelected(item);
                 final GroceryTripDishSelection? selection =
                     _selectedDishes[item.name];
@@ -1050,8 +1507,63 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Grocery trip')),
+      appBar: AppBar(
+        title: const Text('Grocery trip'),
+        actions: <Widget>[
+          IconButton(
+            tooltip: _isDishSearchVisible || _hasActiveDishSearch
+                ? 'Close search'
+                : 'Search dishes',
+            icon: Icon(
+              _isDishSearchVisible || _hasActiveDishSearch
+                  ? Icons.close
+                  : Icons.search,
+            ),
+            onPressed: () {
+              setState(() {
+                if (_isDishSearchVisible || _hasActiveDishSearch) {
+                  _isDishSearchVisible = false;
+                  _clearDishSearch();
+                } else {
+                  _isDishSearchVisible = true;
+                }
+              });
+            },
+          ),
+          IconButton(
+            tooltip: 'Filter dishes',
+            icon: Icon(
+              _activeFilter.hasActiveFilters
+                  ? Icons.filter_alt
+                  : Icons.filter_alt_outlined,
+            ),
+            onPressed: _openFilterMenu,
+          ),
+          IconButton(
+            tooltip: 'Sort dishes',
+            icon: const Icon(Icons.sort),
+            onPressed: _openSortMenu,
+          ),
+        ],
+      ),
       body: body,
     );
+  }
+
+  List<Widget> _buildActiveFilterChipsFrom(DishFilter filter) {
+    return <Widget>[
+      ...filter.selectedCategories.map(
+        (FoodCategory category) => Chip(label: Text(category.label)),
+      ),
+      ...filter.selectedProteins.map(
+        (ProteinType protein) => Chip(label: Text(protein.label)),
+      ),
+      if (filter.minRating > 0)
+        Chip(label: Text('Min rating ${filter.minRating.toStringAsFixed(1)}')),
+      if (filter.minCookingTimeMinutes != null)
+        Chip(label: Text('Min ${filter.minCookingTimeMinutes} min')),
+      if (filter.maxCookingTimeMinutes != null)
+        Chip(label: Text('Max ${filter.maxCookingTimeMinutes} min')),
+    ];
   }
 }

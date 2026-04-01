@@ -2,6 +2,10 @@
 
 All notable user-facing changes to this project should be recorded here.
 
+## v1.4.3
+
+- Added search, rating/time filters, and sort controls to the grocery trip dish selector so the displayed dishes can be narrowed before selecting portions.
+
 ## v1.4.2
 
 - Added optional cooking comments to dish cooking logs and surfaced how many days ago each dish was last cooked in the dishes view.
