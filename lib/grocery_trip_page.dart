@@ -38,6 +38,7 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
   final List<InventoryItem> _inventoryItems = <InventoryItem>[];
   final Map<String, GroceryTripDishSelection> _selectedDishes =
       <String, GroceryTripDishSelection>{};
+  final Set<String> _expandedDishNames = <String>{};
   final Set<String> _selectedRoutineItemIds = <String>{};
   final Map<String, TextEditingController> _portionControllers =
       <String, TextEditingController>{};
@@ -197,6 +198,94 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
 
   bool _isRoutineSelected(RoutineFoodItem item) {
     return _selectedRoutineItemIds.contains(item.id);
+  }
+
+  CookingLog? _latestCookingLog(FoodItem item) {
+    if (item.cookingLogs.isEmpty) {
+      return null;
+    }
+    final List<CookingLog> sortedLogs = List<CookingLog>.from(item.cookingLogs)
+      ..sort((CookingLog a, CookingLog b) => b.cookedAt.compareTo(a.cookedAt));
+    return sortedLogs.first;
+  }
+
+  String _lastCookedText(FoodItem item) {
+    final CookingLog? latestLog = _latestCookingLog(item);
+    if (latestLog == null ||
+        latestLog.cookedAt ==
+            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)) {
+      return 'Not cooked yet';
+    }
+    final DateTime now = DateTime.now().toUtc();
+    final int daysSince = now
+        .difference(DateTime.utc(
+          latestLog.cookedAt.year,
+          latestLog.cookedAt.month,
+          latestLog.cookedAt.day,
+        ))
+        .inDays;
+    if (daysSince <= 0) {
+      return 'Cooked today';
+    }
+    if (daysSince == 1) {
+      return 'Cooked yesterday';
+    }
+    return 'Cooked $daysSince days ago';
+  }
+
+  String _averageRatingText(FoodItem item) {
+    final double? averageRating = item.averageRating;
+    if (averageRating == null) {
+      return 'No ratings yet';
+    }
+    return 'Avg rating: ${item.averageRating!.toStringAsFixed(1)}/5';
+  }
+
+  String _averageDurationText(FoodItem item) {
+    final double? averageDuration = item.averageDurationMinutes;
+    if (averageDuration == null) {
+      return 'No cooking time logged';
+    }
+    return 'Avg time: ${averageDuration.toStringAsFixed(1)} min';
+  }
+
+  String _cookedCountText(int cookedCount) {
+    if (cookedCount == 1) {
+      return 'Cooked 1 time';
+    }
+    return 'Cooked $cookedCount times';
+  }
+
+  Widget _buildCompactMetric({
+    required IconData icon,
+    required String label,
+    Color? color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color ?? Theme.of(context).colorScheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 12),
+          const SizedBox(width: 3),
+          Text(label, style: Theme.of(context).textTheme.labelSmall),
+        ],
+      ),
+    );
+  }
+
+  void _toggleDishExpansion(FoodItem item) {
+    setState(() {
+      if (_expandedDishNames.contains(item.name)) {
+        _expandedDishNames.remove(item.name);
+      } else {
+        _expandedDishNames.add(item.name);
+      }
+    });
   }
 
   bool get _hasActiveDishSearch => _dishSearchQuery.trim().isNotEmpty;
@@ -1199,6 +1288,205 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
     return _selectedDishes.values.toList(growable: false);
   }
 
+  Widget _buildDishSelectorCard(FoodItem item) {
+    final bool isExpanded = _expandedDishNames.contains(item.name);
+    final bool selected = _isSelected(item);
+    final GroceryTripDishSelection? selection = _selectedDishes[item.name];
+    final TextEditingController? controller = selected ? _controllerFor(item) : null;
+    final ProteinType? primaryProtein = item.proteins.isEmpty
+        ? null
+        : item.proteins.first;
+    final CookingLog? latestLog = _latestCookingLog(item);
+
+    return Card(
+      key: ValueKey<String>('grocery_dish_${item.name}'),
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => _toggleDishExpansion(item),
+        child: Padding(
+          padding: const EdgeInsets.all(11),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  CircleAvatar(
+                    radius: 17,
+                    child: primaryProtein == null
+                        ? Icon(item.category.icon, size: 16)
+                        : FaIcon(primaryProtein.icon, size: 14),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          item.name,
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _lastCookedText(item),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: <Widget>[
+                            _buildCompactMetric(
+                              icon: Icons.star_rounded,
+                              label: item.averageRating == null
+                                  ? '--'
+                                  : item.averageRating!.toStringAsFixed(1),
+                              color: Colors.amber.shade100,
+                            ),
+                            if (item.averageDurationMinutes != null)
+                              _buildCompactMetric(
+                                icon: Icons.schedule_outlined,
+                                label: '${item.averageDurationMinutes!.round()}m',
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Column(
+                    children: <Widget>[
+                      FilledButton.tonalIcon(
+                        key: ValueKey<String>('grocery_toggle_${item.name}'),
+                        onPressed: () => _toggleDishSelection(item),
+                        icon: Icon(
+                          selected ? Icons.check_circle : Icons.add_circle,
+                        ),
+                        label: Text(selected ? 'Selected' : 'Add'),
+                        style: FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Icon(
+                        isExpanded ? Icons.expand_less : Icons.expand_more,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              AnimatedCrossFade(
+                crossFadeState: isExpanded
+                    ? CrossFadeState.showSecond
+                    : CrossFadeState.showFirst,
+                duration: const Duration(milliseconds: 180),
+                firstChild: const SizedBox.shrink(),
+                secondChild: Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: <Widget>[
+                          Chip(
+                            avatar: Icon(item.category.icon, size: 12),
+                            label: Text(item.category.label),
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          ...item.proteins.map((ProteinType protein) {
+                            return Chip(
+                              avatar: FaIcon(protein.icon, size: 12),
+                              label: Text(protein.label),
+                              visualDensity: VisualDensity.compact,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                            );
+                          }),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Text(_cookedCountText(item.cookedCount)),
+                      const SizedBox(height: 4),
+                      Text(_averageRatingText(item)),
+                      const SizedBox(height: 2),
+                      Text(_averageDurationText(item)),
+                      if ((latestLog?.comment ?? '').isNotEmpty) ...<Widget>[
+                        const SizedBox(height: 10),
+                        Text(
+                          'Latest comment',
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(latestLog!.comment!),
+                      ],
+                      const SizedBox(height: 10),
+                      Text(
+                        'Ingredients',
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(_dishIngredientSummary(item)),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Recipe portions: ${item.defaultPortions}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      if (selected && selection != null) ...<Widget>[
+                        const SizedBox(height: 10),
+                        Row(
+                          children: <Widget>[
+                            IconButton(
+                              onPressed: selection.portions <= 1
+                                  ? null
+                                  : () => _changePortions(
+                                      item,
+                                      selection.portions - 1,
+                                    ),
+                              icon: const Icon(Icons.remove_circle_outline),
+                            ),
+                            SizedBox(
+                              width: 96,
+                              child: TextField(
+                                key: ValueKey<String>(
+                                  'grocery_portions_${item.name}',
+                                ),
+                                controller: controller,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: 'Portions',
+                                ),
+                                onChanged: (String value) {
+                                  _setPortionsFromInput(item, value);
+                                },
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () => _changePortions(
+                                item,
+                                selection.portions + 1,
+                              ),
+                              icon: const Icon(Icons.add_circle_outline),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   String _selectionSummaryText(List<GroceryTripDishSelection> selections) {
     if (selections.isEmpty) {
       return 'Pick dishes below.';
@@ -1398,107 +1686,7 @@ class _GroceryTripPageState extends State<GroceryTripPage> {
               itemCount: visibleFoodItems.length,
               itemBuilder: (BuildContext context, int index) {
                 final FoodItem item = visibleFoodItems[index];
-                final bool selected = _isSelected(item);
-                final GroceryTripDishSelection? selection =
-                    _selectedDishes[item.name];
-                final TextEditingController? controller = selected
-                    ? _controllerFor(item)
-                    : null;
-
-                return Card(
-                  key: ValueKey<String>('grocery_dish_${item.name}'),
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Row(
-                          children: <Widget>[
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  Text(
-                                    item.name,
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.titleMedium,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Recipe portions: ${item.defaultPortions}',
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    _dishIngredientSummary(item),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            FilledButton.tonalIcon(
-                              key: ValueKey<String>(
-                                'grocery_toggle_${item.name}',
-                              ),
-                              onPressed: () => _toggleDishSelection(item),
-                              icon: Icon(
-                                selected
-                                    ? Icons.check_circle
-                                    : Icons.add_circle,
-                              ),
-                              label: Text(selected ? 'Selected' : 'Add'),
-                            ),
-                          ],
-                        ),
-                        if (selected && selection != null) ...<Widget>[
-                          const SizedBox(height: 12),
-                          Row(
-                            children: <Widget>[
-                              IconButton(
-                                onPressed: selection.portions <= 1
-                                    ? null
-                                    : () => _changePortions(
-                                        item,
-                                        selection.portions - 1,
-                                      ),
-                                icon: const Icon(Icons.remove_circle_outline),
-                              ),
-                              SizedBox(
-                                width: 96,
-                                child: TextField(
-                                  key: ValueKey<String>(
-                                    'grocery_portions_${item.name}',
-                                  ),
-                                  controller: controller,
-                                  keyboardType: TextInputType.number,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Portions',
-                                  ),
-                                  onChanged: (String value) {
-                                    _setPortionsFromInput(item, value);
-                                  },
-                                ),
-                              ),
-                              IconButton(
-                                onPressed: () => _changePortions(
-                                  item,
-                                  selection.portions + 1,
-                                ),
-                                icon: const Icon(Icons.add_circle_outline),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                );
+                return _buildDishSelectorCard(item);
               },
             ),
           ),

@@ -2,6 +2,10 @@
 
 All notable user-facing changes to this project should be recorded here.
 
+## v1.4.4
+
+- Updated grocery trip dish cards to show the same core dish info as the main dishes view, with ingredients and portion controls moved into the expanded card content.
+
 ## v1.4.3
 
 - Added search, rating/time filters, and sort controls to the grocery trip dish selector so the displayed dishes can be narrowed before selecting portions.
