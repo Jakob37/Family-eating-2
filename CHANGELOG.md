@@ -2,6 +2,10 @@
 
 All notable user-facing changes to this project should be recorded here.
 
+## v1.4.1
+
+- Slimmed down the dishes tab with tighter cards, fewer always-visible badges, and floating grocery-trip access instead of a full-width inline button.
+
 ## v1.4.0
 
 - Added a third `Expiry` tab for tracking household food items with storage location, notes, quantity labels, and expiry dates.

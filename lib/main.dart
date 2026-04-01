@@ -1866,7 +1866,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           ? const SizedBox.shrink()
           : Padding(
               key: const ValueKey<String>('dish_search_container'),
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
@@ -3586,7 +3586,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     Color? color,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
         color: (color ?? Theme.of(context).colorScheme.secondaryContainer),
         borderRadius: BorderRadius.circular(999),
@@ -3594,9 +3594,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(icon, size: 14),
-          const SizedBox(width: 4),
-          Text(label),
+          Icon(icon, size: 12),
+          const SizedBox(width: 3),
+          Text(label, style: Theme.of(context).textTheme.labelSmall),
         ],
       ),
     );
@@ -3611,7 +3611,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         .join(', ');
   }
 
-  Widget _buildDishCard(FoodItem item, int ranking) {
+  Widget _buildDishCard(FoodItem item) {
     final bool isExpanded = _expandedDishNames.contains(item.name);
     final ProteinType? primaryProtein = item.proteins.isEmpty
         ? null
@@ -3631,11 +3631,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         _removeDish(item);
       },
       background: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 20),
+        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 18),
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.primaryContainer,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
         ),
         alignment: Alignment.centerLeft,
         child: Icon(
@@ -3644,11 +3644,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         ),
       ),
       secondaryBackground: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 20),
+        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 18),
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.errorContainer,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
         ),
         alignment: Alignment.centerRight,
         child: Icon(
@@ -3657,12 +3657,12 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         ),
       ),
       child: Card(
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           onTap: () => _toggleDishExpansion(item),
           child: Padding(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(11),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -3670,45 +3670,25 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     CircleAvatar(
-                      radius: 20,
+                      radius: 17,
                       child: primaryProtein == null
-                          ? Icon(item.category.icon, size: 18)
-                          : FaIcon(primaryProtein.icon, size: 16),
+                          ? Icon(item.category.icon, size: 16)
+                          : FaIcon(primaryProtein.icon, size: 14),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          Row(
-                            children: <Widget>[
-                              Expanded(
-                                child: Text(
-                                  item.name,
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.titleMedium,
-                                ),
-                              ),
-                              Text(
-                                '#$ranking',
-                                style: Theme.of(context).textTheme.labelMedium,
-                              ),
-                            ],
+                          Text(
+                            item.name,
+                            style: Theme.of(context).textTheme.titleSmall,
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 6),
                           Wrap(
                             spacing: 6,
-                            runSpacing: 6,
+                            runSpacing: 4,
                             children: <Widget>[
-                              _buildCompactMetric(
-                                icon: item.category.icon,
-                                label: item.category.label,
-                              ),
-                              _buildCompactMetric(
-                                icon: Icons.history,
-                                label: item.cookedCount.toString(),
-                              ),
                               _buildCompactMetric(
                                 icon: Icons.star_rounded,
                                 label: item.averageRating == null
@@ -3716,39 +3696,40 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                     : _formatRating(item.averageRating!),
                                 color: Colors.amber.shade100,
                               ),
-                              _buildCompactMetric(
-                                icon: Icons.people_outline,
-                                label: '${item.defaultPortions}p',
-                              ),
                               if (item.averageDurationMinutes != null)
                                 _buildCompactMetric(
                                   icon: Icons.schedule_outlined,
                                   label:
                                       '${item.averageDurationMinutes!.round()}m',
                                 ),
-                              if (item.recipeUrl != null)
-                                _buildCompactMetric(
-                                  icon: Icons.link,
-                                  label: 'Recipe',
-                                ),
                             ],
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                     Column(
                       children: <Widget>[
                         IconButton(
                           key: ValueKey<String>('dish_log_${item.name}'),
                           tooltip: 'Log cooking',
                           onPressed: () => _logCookingForDish(item),
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 34,
+                            height: 34,
+                          ),
                           icon: const Icon(Icons.check_circle_outline),
                         ),
                         IconButton(
                           key: ValueKey<String>('dish_edit_${item.name}'),
                           tooltip: 'Edit dish',
                           onPressed: () => _editDish(item),
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 34,
+                            height: 34,
+                          ),
                           icon: const Icon(Icons.edit_outlined),
                         ),
                         Icon(
@@ -3765,7 +3746,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   duration: const Duration(milliseconds: 180),
                   firstChild: const SizedBox.shrink(),
                   secondChild: Padding(
-                    padding: const EdgeInsets.only(top: 12),
+                    padding: const EdgeInsets.only(top: 10),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
@@ -3791,13 +3772,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                             }),
                           ],
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 10),
                         Text(_cookedCountText(item.cookedCount)),
                         const SizedBox(height: 4),
                         Text(_averageRatingText(item)),
                         const SizedBox(height: 2),
                         Text(_averageDurationText(item)),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 10),
                         Text(
                           'Ingredients',
                           style: Theme.of(context).textTheme.labelLarge,
@@ -3805,7 +3786,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                         const SizedBox(height: 4),
                         Text(_ingredientSummary(item)),
                         if (item.recipeUrl != null) ...<Widget>[
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 10),
                           Text(
                             'Recipe URL',
                             style: Theme.of(context).textTheme.labelLarge,
@@ -3839,13 +3820,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     final bool isCurrentWeek = _selectedWeekStart == _currentWeekStartKey();
     final int plannedCount = weekPlan?.entries.length ?? 0;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
       child: Card(
         child: AnimatedSize(
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeInOut,
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -3890,7 +3871,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -4000,7 +3981,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                               },
                       );
                     }),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
@@ -4117,18 +4098,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     if (_foodItems.isEmpty) {
       return Column(
         children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                key: const ValueKey<String>('open_grocery_trip_button'),
-                onPressed: _openGroceryTrip,
-                icon: const Icon(Icons.shopping_cart_checkout),
-                label: const Text('Grocery trip'),
-              ),
-            ),
-          ),
           _buildWeekPlanCard(),
           const Expanded(
             child: Center(child: Text('No food items yet. Tap + to add one.')),
@@ -4144,18 +4113,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           _activeFilter.hasActiveFilters || trimmedQuery.isNotEmpty;
       return Column(
         children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                key: const ValueKey<String>('open_grocery_trip_button'),
-                onPressed: _openGroceryTrip,
-                icon: const Icon(Icons.shopping_cart_checkout),
-                label: const Text('Grocery trip'),
-              ),
-            ),
-          ),
           _buildWeekPlanCard(),
           _buildDishSearchBar(),
           Expanded(
@@ -4207,23 +4164,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
     return Column(
       children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-          child: SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              key: const ValueKey<String>('open_grocery_trip_button'),
-              onPressed: _openGroceryTrip,
-              icon: const Icon(Icons.shopping_cart_checkout),
-              label: const Text('Grocery trip'),
-            ),
-          ),
-        ),
         _buildWeekPlanCard(),
         _buildDishSearchBar(),
         if (_activeFilter.hasActiveFilters)
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -4247,7 +4192,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             itemCount: visibleFoodItems.length,
             itemBuilder: (BuildContext context, int index) {
               final FoodItem item = visibleFoodItems[index];
-              return _buildDishCard(item, index + 1);
+              return _buildDishCard(item);
             },
           ),
         ),
@@ -4477,10 +4422,23 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       floatingActionButton: _isLoading || _loadError != null
           ? null
           : switch (_selectedTabIndex) {
-              0 => FloatingActionButton(
-                  onPressed: _addFoodItem,
-                  tooltip: 'Add dish',
-                  child: const Icon(Icons.add),
+              0 => Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: <Widget>[
+                    FloatingActionButton.small(
+                      key: const ValueKey<String>('open_grocery_trip_button'),
+                      onPressed: _openGroceryTrip,
+                      tooltip: 'Grocery trip',
+                      child: const Icon(Icons.shopping_cart_checkout),
+                    ),
+                    const SizedBox(height: 10),
+                    FloatingActionButton(
+                      onPressed: _addFoodItem,
+                      tooltip: 'Add dish',
+                      child: const Icon(Icons.add),
+                    ),
+                  ],
                 ),
               2 => FloatingActionButton(
                   onPressed: _addInventoryItem,
