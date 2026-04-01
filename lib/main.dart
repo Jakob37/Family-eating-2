@@ -250,20 +250,28 @@ class FoodItem {
 }
 
 class CookingLog {
-  const CookingLog({required this.cookedAt, this.rating, this.durationMinutes});
+  const CookingLog({
+    required this.cookedAt,
+    this.rating,
+    this.durationMinutes,
+    this.comment,
+  });
 
   final DateTime cookedAt;
   final double? rating;
   final int? durationMinutes;
+  final String? comment;
 
   factory CookingLog.fromJson(Map<String, dynamic> json) {
     final DateTime cookedAt = _parseCookedAt(json['cookedAt']);
     final double? rating = _parseRating(json['rating']);
     final int? durationMinutes = _parseDuration(json['durationMinutes']);
+    final String? comment = _parseComment(json['comment']);
     return CookingLog(
       cookedAt: cookedAt,
       rating: rating,
       durationMinutes: durationMinutes,
+      comment: comment,
     );
   }
 
@@ -272,6 +280,7 @@ class CookingLog {
       'cookedAt': cookedAt.toUtc().toIso8601String(),
       'rating': rating,
       'durationMinutes': durationMinutes,
+      'comment': comment,
     };
   }
 
@@ -308,6 +317,11 @@ class CookingLog {
       return null;
     }
     return parsed;
+  }
+
+  static String? _parseComment(dynamic rawComment) {
+    final String normalized = (rawComment ?? '').toString().trim();
+    return normalized.isEmpty ? null : normalized;
   }
 }
 
@@ -1453,6 +1467,39 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       return 'No cooking time logged';
     }
     return 'Avg time: ${averageDuration.toStringAsFixed(1)} min';
+  }
+
+  CookingLog? _latestCookingLog(FoodItem item) {
+    if (item.cookingLogs.isEmpty) {
+      return null;
+    }
+    final List<CookingLog> sortedLogs = List<CookingLog>.from(item.cookingLogs)
+      ..sort((CookingLog a, CookingLog b) => b.cookedAt.compareTo(a.cookedAt));
+    return sortedLogs.first;
+  }
+
+  String _lastCookedText(FoodItem item) {
+    final CookingLog? latestLog = _latestCookingLog(item);
+    if (latestLog == null ||
+        latestLog.cookedAt ==
+            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)) {
+      return 'Not cooked yet';
+    }
+    final DateTime now = DateTime.now().toUtc();
+    final int daysSince = now
+        .difference(DateTime.utc(
+          latestLog.cookedAt.year,
+          latestLog.cookedAt.month,
+          latestLog.cookedAt.day,
+        ))
+        .inDays;
+    if (daysSince <= 0) {
+      return 'Cooked today';
+    }
+    if (daysSince == 1) {
+      return 'Cooked yesterday';
+    }
+    return 'Cooked $daysSince days ago';
   }
 
   List<Widget> _buildStarPreview(double rating) {
@@ -3500,6 +3547,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   Future<CookingLog?> _showCookingLogDialog() async {
     double rating = 3.0;
     String durationInput = '';
+    final TextEditingController commentController = TextEditingController();
     String? durationError;
 
     return showDialog<CookingLog>(
@@ -3541,6 +3589,16 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                       });
                     },
                   ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: commentController,
+                    minLines: 2,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'Comment (optional)',
+                      hintText: 'Anything worth remembering?',
+                    ),
+                  ),
                 ],
               ),
               actions: <Widget>[
@@ -3567,6 +3625,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                         cookedAt: DateTime.now().toUtc(),
                         rating: rating,
                         durationMinutes: parsedDuration,
+                        comment: commentController.text.trim().isEmpty
+                            ? null
+                            : commentController.text.trim(),
                       ),
                     );
                   },
@@ -3577,7 +3638,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           },
         );
       },
-    );
+    ).whenComplete(() {
+      commentController.dispose();
+    });
   }
 
   Widget _buildCompactMetric({
@@ -3616,6 +3679,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     final ProteinType? primaryProtein = item.proteins.isEmpty
         ? null
         : item.proteins.first;
+    final CookingLog? latestLog = _latestCookingLog(item);
 
     return Dismissible(
       key: ValueKey<String>('dish_card_${item.name}'),
@@ -3683,6 +3747,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                           Text(
                             item.name,
                             style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _lastCookedText(item),
+                            style: Theme.of(context).textTheme.bodySmall,
                           ),
                           const SizedBox(height: 6),
                           Wrap(
@@ -3778,6 +3847,15 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                         Text(_averageRatingText(item)),
                         const SizedBox(height: 2),
                         Text(_averageDurationText(item)),
+                        if ((latestLog?.comment ?? '').isNotEmpty) ...<Widget>[
+                          const SizedBox(height: 10),
+                          Text(
+                            'Latest comment',
+                            style: Theme.of(context).textTheme.labelLarge,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(latestLog!.comment!),
+                        ],
                         const SizedBox(height: 10),
                         Text(
                           'Ingredients',

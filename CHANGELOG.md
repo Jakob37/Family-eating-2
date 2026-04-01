@@ -2,6 +2,10 @@
 
 All notable user-facing changes to this project should be recorded here.
 
+## v1.4.2
+
+- Added optional cooking comments to dish cooking logs and surfaced how many days ago each dish was last cooked in the dishes view.
+
 ## v1.4.1
 
 - Slimmed down the dishes tab with tighter cards, fewer always-visible badges, and floating grocery-trip access instead of a full-width inline button.
