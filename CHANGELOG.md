@@ -2,6 +2,10 @@
 
 All notable user-facing changes to this project should be recorded here.
 
+## v1.3.5
+
+- Week plan dishes now open the same cooking log popup as the dish list when marked done, and they only save as cooked after that dialog is completed.
+
 ## v1.3.4
 
 - Moved the full grocery trip workflow into its own file so the main family app shell and the grocery-planning flow can evolve independently.

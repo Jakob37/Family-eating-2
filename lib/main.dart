@@ -2602,13 +2602,33 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
   Future<void> _toggleWeekEntryCooked(
     WeekPlanEntry entry,
+    FoodItem item,
     bool isCooked,
   ) async {
     final WeekPlan? selectedPlan = _selectedWeekPlan;
     if (selectedPlan == null) {
       return;
     }
+    final int itemIndex = _foodItems.indexOf(item);
+    if (itemIndex == -1) {
+      return;
+    }
+    CookingLog? cookingLog;
+    if (isCooked) {
+      cookingLog = await _showCookingLogDialog();
+      if (cookingLog == null) {
+        return;
+      }
+    }
     setState(() {
+      if (cookingLog != null) {
+        final FoodItem selectedItem = _foodItems[itemIndex];
+        final List<CookingLog> updatedLogs = List<CookingLog>.from(
+          selectedItem.cookingLogs,
+        )..add(cookingLog);
+        _foodItems[itemIndex] = selectedItem.copyWith(cookingLogs: updatedLogs);
+        _sortFoodItemsByRanking();
+      }
       _upsertWeekPlan(
         selectedPlan.copyWith(
           entries: selectedPlan.entries
@@ -3955,7 +3975,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                         onChanged: item == null
                             ? null
                             : (bool? value) {
-                                _toggleWeekEntryCooked(entry, value ?? false);
+                                _toggleWeekEntryCooked(
+                                  entry,
+                                  item,
+                                  value ?? false,
+                                );
                               },
                       );
                     }),
