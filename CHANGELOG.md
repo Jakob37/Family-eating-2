@@ -2,6 +2,11 @@
 
 All notable user-facing changes to this project should be recorded here.
 
+## v1.4.6
+
+- Allowed week-plan dishes to be marked cooked without forcing a cooking log, while keeping an explicit log-cooking action available in the week plan.
+- Added free-text name filtering to the week planner and tightened week-plan entry rows so the cooked toggle no longer takes a full tile row.
+
 ## v1.4.5
 
 - Added a week-plan action to copy last week's dishes into the current week, with overwrite confirmation when this week already has a plan.

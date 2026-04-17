@@ -1296,6 +1296,7 @@ String _weekLabel(String weekStart) {
 
 class DishFilter {
   const DishFilter({
+    this.nameQuery = '',
     this.selectedCategories = const <FoodCategory>{},
     this.selectedProteins = const <ProteinType>{},
     this.minRating = 0,
@@ -1305,6 +1306,7 @@ class DishFilter {
 
   static const DishFilter empty = DishFilter();
 
+  final String nameQuery;
   final Set<FoodCategory> selectedCategories;
   final Set<ProteinType> selectedProteins;
   final double minRating;
@@ -1312,7 +1314,8 @@ class DishFilter {
   final int? maxCookingTimeMinutes;
 
   bool get hasActiveFilters {
-    return selectedCategories.isNotEmpty ||
+    return nameQuery.trim().isNotEmpty ||
+        selectedCategories.isNotEmpty ||
         selectedProteins.isNotEmpty ||
         minRating > 0 ||
         minCookingTimeMinutes != null ||
@@ -1320,6 +1323,7 @@ class DishFilter {
   }
 
   DishFilter copyWith({
+    String? nameQuery,
     Set<FoodCategory>? selectedCategories,
     Set<ProteinType>? selectedProteins,
     double? minRating,
@@ -1327,6 +1331,7 @@ class DishFilter {
     int? maxCookingTimeMinutes,
   }) {
     return DishFilter(
+      nameQuery: nameQuery ?? this.nameQuery,
       selectedCategories: selectedCategories ?? this.selectedCategories,
       selectedProteins: selectedProteins ?? this.selectedProteins,
       minRating: minRating ?? this.minRating,
@@ -1487,11 +1492,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     }
     final DateTime now = DateTime.now().toUtc();
     final int daysSince = now
-        .difference(DateTime.utc(
-          latestLog.cookedAt.year,
-          latestLog.cookedAt.month,
-          latestLog.cookedAt.day,
-        ))
+        .difference(
+          DateTime.utc(
+            latestLog.cookedAt.year,
+            latestLog.cookedAt.month,
+            latestLog.cookedAt.day,
+          ),
+        )
         .inDays;
     if (daysSince <= 0) {
       return 'Cooked today';
@@ -1567,6 +1574,12 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   }
 
   bool _matchesFilter(FoodItem item, DishFilter filter) {
+    final String normalizedNameQuery = filter.nameQuery.trim().toLowerCase();
+    if (normalizedNameQuery.isNotEmpty &&
+        !item.name.toLowerCase().contains(normalizedNameQuery)) {
+      return false;
+    }
+
     if (filter.selectedCategories.isNotEmpty &&
         !filter.selectedCategories.contains(item.category)) {
       return false;
@@ -2340,6 +2353,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         entry.dishName: entry.isCooked,
     };
     DishFilter plannerFilter = DishFilter.empty;
+    final TextEditingController plannerNameController = TextEditingController();
     final Map<String, TextEditingController> controllers =
         <String, TextEditingController>{
           for (final FoodItem item in _foodItems)
@@ -2384,13 +2398,27 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   children: <Widget>[
                     Row(
                       children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            plannerFilter.hasActiveFilters
-                                ? 'Showing filtered dishes and selected dishes'
-                                : 'Showing all dishes',
+                        Flexible(
+                          child: TextField(
+                            controller: plannerNameController,
+                            decoration: const InputDecoration(
+                              labelText: 'Filter by name',
+                              hintText: 'Search dishes',
+                              prefixIcon: Icon(Icons.search),
+                              isDense: true,
+                              border: OutlineInputBorder(),
+                            ),
+                            textInputAction: TextInputAction.search,
+                            onChanged: (String value) {
+                              setDialogState(() {
+                                plannerFilter = plannerFilter.copyWith(
+                                  nameQuery: value,
+                                );
+                              });
+                            },
                           ),
                         ),
+                        const SizedBox(width: 8),
                         TextButton.icon(
                           onPressed: () async {
                             final DishFilter? nextFilter =
@@ -2401,6 +2429,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                             if (nextFilter == null) {
                               return;
                             }
+                            plannerNameController.text = nextFilter.nameQuery;
                             setDialogState(() {
                               plannerFilter = nextFilter;
                             });
@@ -2425,6 +2454,12 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                               Chip(
                                 label: Text(
                                   'Categories: ${plannerFilter.selectedCategories.map((FoodCategory category) => category.label).join(', ')}',
+                                ),
+                              ),
+                            if (plannerFilter.nameQuery.trim().isNotEmpty)
+                              Chip(
+                                label: Text(
+                                  'Name: ${plannerFilter.nameQuery.trim()}',
                                 ),
                               ),
                             if (plannerFilter.selectedProteins.isNotEmpty)
@@ -2454,6 +2489,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                             ActionChip(
                               label: const Text('Clear'),
                               onPressed: () {
+                                plannerNameController.clear();
                                 setDialogState(() {
                                   plannerFilter = DishFilter.empty;
                                 });
@@ -2597,6 +2633,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         );
       },
     ).whenComplete(() {
+      plannerNameController.dispose();
       for (final TextEditingController controller in controllers.values) {
         controller.dispose();
       }
@@ -2671,9 +2708,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       _upsertWeekPlan(
         WeekPlan(
           weekStart: currentWeekStart,
-          entries: previousWeekPlan.entries.map((WeekPlanEntry entry) {
-            return entry.copyWith(isCooked: false);
-          }).toList(growable: false),
+          entries: previousWeekPlan.entries
+              .map((WeekPlanEntry entry) {
+                return entry.copyWith(isCooked: false);
+              })
+              .toList(growable: false),
         ),
       );
       _selectedWeekStart = currentWeekStart;
@@ -2738,22 +2777,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     if (itemIndex == -1) {
       return;
     }
-    CookingLog? cookingLog;
-    if (isCooked) {
-      cookingLog = await _showCookingLogDialog();
-      if (cookingLog == null) {
-        return;
-      }
-    }
     setState(() {
-      if (cookingLog != null) {
-        final FoodItem selectedItem = _foodItems[itemIndex];
-        final List<CookingLog> updatedLogs = List<CookingLog>.from(
-          selectedItem.cookingLogs,
-        )..add(cookingLog);
-        _foodItems[itemIndex] = selectedItem.copyWith(cookingLogs: updatedLogs);
-        _sortFoodItemsByRanking();
-      }
       _upsertWeekPlan(
         selectedPlan.copyWith(
           entries: selectedPlan.entries
@@ -2762,6 +2786,45 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   return current;
                 }
                 return current.copyWith(isCooked: isCooked);
+              })
+              .toList(growable: false),
+        ),
+      );
+    });
+    await _persistData();
+  }
+
+  Future<void> _logCookingForWeekEntry(
+    WeekPlanEntry entry,
+    FoodItem item,
+  ) async {
+    final WeekPlan? selectedPlan = _selectedWeekPlan;
+    if (selectedPlan == null) {
+      return;
+    }
+    final int itemIndex = _foodItems.indexOf(item);
+    if (itemIndex == -1) {
+      return;
+    }
+    final CookingLog? cookingLog = await _showCookingLogDialog();
+    if (cookingLog == null) {
+      return;
+    }
+    setState(() {
+      final FoodItem selectedItem = _foodItems[itemIndex];
+      final List<CookingLog> updatedLogs = List<CookingLog>.from(
+        selectedItem.cookingLogs,
+      )..add(cookingLog);
+      _foodItems[itemIndex] = selectedItem.copyWith(cookingLogs: updatedLogs);
+      _sortFoodItemsByRanking();
+      _upsertWeekPlan(
+        selectedPlan.copyWith(
+          entries: selectedPlan.entries
+              .map((WeekPlanEntry current) {
+                if (current.dishName != entry.dishName) {
+                  return current;
+                }
+                return current.copyWith(isCooked: true);
               })
               .toList(growable: false),
         ),
@@ -3963,9 +4026,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     final WeekPlan? weekPlan = _selectedWeekPlan;
     final bool isCurrentWeek = _selectedWeekStart == _currentWeekStartKey();
     final bool hasPreviousWeekPlan =
-        _weekPlanForStart(_shiftWeekStartKey(_currentWeekStartKey(), -1))
-            ?.entries
-            .isNotEmpty ??
+        _weekPlanForStart(
+          _shiftWeekStartKey(_currentWeekStartKey(), -1),
+        )?.entries.isNotEmpty ??
         false;
     final int plannedCount = weekPlan?.entries.length ?? 0;
     return Padding(
@@ -4097,37 +4160,67 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                       final FoodItem? item = _findFoodItemByName(
                         entry.dishName,
                       );
-                      return CheckboxListTile(
-                        key: ValueKey<String>('week_entry_${entry.dishName}'),
-                        value: entry.isCooked,
-                        dense: true,
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        contentPadding: EdgeInsets.zero,
-                        controlAffinity: ListTileControlAffinity.leading,
-                        title: Text(entry.dishName),
-                        subtitle: item == null
-                            ? const Text('Dish missing')
-                            : null,
-                        secondary: item == null
-                            ? null
-                            : IconButton(
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          children: <Widget>[
+                            Checkbox(
+                              key: ValueKey<String>(
+                                'week_entry_${entry.dishName}',
+                              ),
+                              value: entry.isCooked,
+                              visualDensity: VisualDensity.compact,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                              onChanged: item == null
+                                  ? null
+                                  : (bool? value) {
+                                      _toggleWeekEntryCooked(
+                                        entry,
+                                        item,
+                                        value ?? false,
+                                      );
+                                    },
+                            ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(entry.dishName),
+                                  Text(
+                                    item == null
+                                        ? 'Dish missing'
+                                        : '${entry.portions} portion${entry.portions == 1 ? '' : 's'}',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodySmall,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (item != null)
+                              IconButton(
+                                key: ValueKey<String>(
+                                  'week_entry_log_${entry.dishName}',
+                                ),
+                                tooltip: 'Log cooking',
+                                visualDensity: VisualDensity.compact,
+                                onPressed: () =>
+                                    _logCookingForWeekEntry(entry, item),
+                                icon: const Icon(Icons.check_circle_outline),
+                              ),
+                            if (item != null)
+                              IconButton(
                                 key: ValueKey<String>(
                                   'week_entry_edit_${entry.dishName}',
                                 ),
                                 tooltip: 'Edit dish',
+                                visualDensity: VisualDensity.compact,
                                 onPressed: () => _editDish(item),
                                 icon: const Icon(Icons.edit_outlined),
                               ),
-                        onChanged: item == null
-                            ? null
-                            : (bool? value) {
-                                _toggleWeekEntryCooked(
-                                  entry,
-                                  item,
-                                  value ?? false,
-                                );
-                              },
+                          ],
+                        ),
                       );
                     }),
                     const SizedBox(height: 6),
@@ -4198,8 +4291,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                               onPressed: _copyPreviousWeekToCurrentWeek,
                               style: OutlinedButton.styleFrom(
                                 visualDensity: VisualDensity.compact,
-                                tapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                 minimumSize: const Size(36, 36),
                                 padding: EdgeInsets.zero,
                               ),
@@ -4590,28 +4682,28 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           ? null
           : switch (_selectedTabIndex) {
               0 => Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: <Widget>[
-                    FloatingActionButton.small(
-                      key: const ValueKey<String>('open_grocery_trip_button'),
-                      onPressed: _openGroceryTrip,
-                      tooltip: 'Grocery trip',
-                      child: const Icon(Icons.shopping_cart_checkout),
-                    ),
-                    const SizedBox(height: 10),
-                    FloatingActionButton(
-                      onPressed: _addFoodItem,
-                      tooltip: 'Add dish',
-                      child: const Icon(Icons.add),
-                    ),
-                  ],
-                ),
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: <Widget>[
+                  FloatingActionButton.small(
+                    key: const ValueKey<String>('open_grocery_trip_button'),
+                    onPressed: _openGroceryTrip,
+                    tooltip: 'Grocery trip',
+                    child: const Icon(Icons.shopping_cart_checkout),
+                  ),
+                  const SizedBox(height: 10),
+                  FloatingActionButton(
+                    onPressed: _addFoodItem,
+                    tooltip: 'Add dish',
+                    child: const Icon(Icons.add),
+                  ),
+                ],
+              ),
               2 => FloatingActionButton(
-                  onPressed: _addInventoryItem,
-                  tooltip: 'Add expiry item',
-                  child: const Icon(Icons.add),
-                ),
+                onPressed: _addInventoryItem,
+                tooltip: 'Add expiry item',
+                child: const Icon(Icons.add),
+              ),
               _ => null,
             },
     );
